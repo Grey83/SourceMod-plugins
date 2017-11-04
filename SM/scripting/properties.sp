@@ -3,7 +3,7 @@
 
 #include <sdktools>
 
-static const char	PLUGIN_NAME[]		= "val",
+static const char	PLUGIN_NAME[]		= "Values of the properties",
 					PLUGIN_VERSION[]	= "1.0.0";
 
 static const int	iBoxColor[]			= {255, 165, 0, 255};
