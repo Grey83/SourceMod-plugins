@@ -41,26 +41,40 @@ public void OnPluginStart()
 	EngineVersion engine = GetEngineVersion();
 	if(!(bCS = engine == Engine_CSGO || engine == Engine_CSS)) iTeams = GetTeamCount();
 
-	HookEvent("round_start", Event_Start);
 	HookEvent("round_start", Event_Start, EventHookMode_PostNoCopy);
 	HookEvent("round_end", Event_End, EventHookMode_PostNoCopy);
+	HookEvent("player_spawn", Event_Spawn);
 
 	if(bLate)
 	{
 		bLate = false;
-		for(int i = 1; i <= MaxClients; i++) if(IsClientInGame(i)) OnClientPostAdminCheck(i);
+		bEnabled = true;
+		for(int i = 1; i <= MaxClients; i++) if(IsClientInGame(i))
+		{
+			OnClientPostAdminCheck(i);
+			bNew[i] = false;
+		}
 	}
 }
 
 public void Event_Start(Event event, const char[] name, bool dontBroadcast)
 {
 	bEnabled = true;
-	for(int i = 1, time = GetTime(); i <= MaxClients; i++) if(IsClientInGame(i)) iLastGood[i] = time;
+	for(int i = 1, time = GetTime(); i <= MaxClients; i++) if(IsClientInGame(i))
+	{
+		iLastGood[i] = time;
+		bNew[i] = false;
+	}
 }
 
 public void Event_End(Event event, const char[] name, bool dontBroadcast)
 {
 	bEnabled = false;
+}
+
+public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
+{
+	bNew[event.GetInt("userid")] = false;
 }
 
 public void OnClientPostAdminCheck(int client)
@@ -82,16 +96,16 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	if(!(bAFK[client] = buttons == old_buttons[client])) iLastGood[client] = time;
 	old_buttons[client] = buttons;
 
-	if(time + check[2] > iLastGood[client])
+	if(time > iLastGood[client] + check[2])
 		KickClient(client, "AFK больше %i секунд. Goodnight, sweet prince", check[2]);
-	else if(time + check[1] > iLastGood[client])
+	else if(time > iLastGood[client] + check[1])
 	{
 		PrintCenterText(client, "За пребывание AFK через %i секунд\nВы будете кикнуты с сервера!", check[2] - check[1]);
 		if(bCS) CS_SwitchTeam(client, CS_TEAM_SPECTATOR);
 		else if(iTeams > 3) ChangeClientTeam(client, CS_TEAM_SPECTATOR);
 		else ForcePlayerSuicide(client);
 	}
-	else if(time + check[0] > iLastGood[client])
+	else if(time > iLastGood[client] + check[0])
 		PrintCenterText(client, "За пребывание AFK через %i секунд\nВы будете перемещены в наблюдатели!", check[1] - check[0]);
 
 	return Plugin_Continue;
