@@ -7,6 +7,7 @@
 #include <sdktools_entinput>
 #include <sdktools_tempents>
 #include <sdktools_sound>
+//#include <sdktools_variant_t>	// only for SM1.9
 
 static const char	PLUGIN_NAME[]		= "Revival",
 					PLUGIN_VERSION[]	= "1.0.4",
