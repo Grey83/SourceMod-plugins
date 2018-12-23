@@ -9,9 +9,9 @@
 #include <sdktools_sound>
 
 static const char	PLUGIN_NAME[]		= "Revival",
-					PLUGIN_VERSION[]	= "1.0.3",
+					PLUGIN_VERSION[]	= "1.0.4",
 
-					MARK_DWNLD[][]		= {"materials/hud/scoreboard_dead.vmt", "materials/hud/scoreboard_dead.vtf"},
+					MARK_MDL[]			= "hud/scoreboard_dead.vmt",
 					KEY_NAME[][]		= {"Ctrl", "E", "Shift"};
 static const int	COLOR[][]	= {{255, 63, 31, 191}, {31, 63, 255, 191}, {0, 191, 0, 191}},	// T, CT, Any
 					KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
@@ -54,7 +54,9 @@ public Plugin myinfo =
 	name		= PLUGIN_NAME,
 	author		= "Grey83",
 	description	= "Press and hold +USE above death place to respawn player",
-	version		= PLUGIN_VERSION
+	version		= PLUGIN_VERSION,
+	url			= "https://steamcommunity.com/groups/grey83ds"
+//	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/sm_revival.sp
 };
 
 public void OnPluginStart()
@@ -300,8 +302,8 @@ public Action Event_Death(Event event, const char[] name, bool dontBroadcast)
 	if(iClean < 0) return Plugin_Continue;
 	static int iOffsetRagdoll = -1;
 	if((iOffsetRagdoll != -1 || (iOffsetRagdoll = FindSendPropInfo("CCSPlayer", "m_hRagdoll")) != -1)
-	&& (client = GetEntDataEnt2(client, iOffsetRagdoll)) != -1)
-		CreateTimer(iClean+0.0, Timer_RemoveBody, client, TIMER_FLAG_NO_MAPCHANGE);
+	&& (client = GetEntDataEnt2(client, iOffsetRagdoll)) != -1 && IsValidEntity(client))
+		CreateTimer(iClean+0.0, Timer_RemoveBody, EntIndexToEntRef(client), TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Continue;
 }
@@ -464,7 +466,7 @@ stock void CreateMark(int client)
 	}
 	else if((ent = CreateEntityByName("env_sprite")) != -1)
 	{
-		DispatchKeyValue(ent, "model", MARK_DWNLD[0][10]);
+		DispatchKeyValue(ent, "model", MARK_MDL);
 		DispatchKeyValue(ent, "classname", "death_mark");
 		DispatchKeyValue(ent, "spawnflags", "1");
 		DispatchKeyValueFloat(ent, "scale", MARK_SIZE);
@@ -600,7 +602,7 @@ stock void SendProgressBar(const int client, const int target = 0, const float t
 	SetEntDataFloat(client, iOffsetStart, time, true);
 	SetEntData(client, iOffsetDuration, duration, true);
 
-	if(!target || IsFakeClient(target)) return;
+	if(!target || !IsClientInGame(target) || IsFakeClient(target)) return;
 	SetEntDataFloat(target, iOffsetStart, time, true);
 	SetEntData(target, iOffsetDuration, duration, true);
 }
@@ -649,10 +651,3 @@ stock void TE_SetupBeamRingTarget(const int target, int team)
 	TE_WriteNum("m_nFlags", 0);
 	TE_WriteNum("m_nFadeLength", 0);
 }
-/*/
-L 12/17/2018 - 19:53:12: [SM] Exception reported: Entity 149 (149) is not a CBaseEntity
-L 12/17/2018 - 19:53:12: [SM] Blaming: sm_revival.smx
-L 12/17/2018 - 19:53:12: [SM] Call stack trace:
-L 12/17/2018 - 19:53:12: [SM]   [0] AcceptEntityInput
-L 12/17/2018 - 19:53:12: [SM]   [1] Line 315, sm_revival 1.0.1.sp::Timer_RemoveBody
-*/
