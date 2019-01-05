@@ -7,12 +7,15 @@
 #include <sdktools_entinput>
 #include <sdktools_tempents>
 #include <sdktools_sound>
-//#include <sdktools_variant_t>	// only for SM1.9
+#if SOURCEMOD_V_MINOR >= 9
+	#include <sdktools_variant_t>
+#endif
 
 static const char	PLUGIN_NAME[]		= "Revival",
-					PLUGIN_VERSION[]	= "1.0.4",
+					PLUGIN_VERSION[]	= "1.0.5",
 
-					MARK_MDL[]			= "hud/scoreboard_dead.vmt",
+					MARK_MDL1[]			= "hud/scoreboard_dead.vmt",
+					MARK_MDL2[]			= "sprites/glow.vmt",
 					KEY_NAME[][]		= {"Ctrl", "E", "Shift"};
 static const int	COLOR[][]	= {{255, 63, 31, 191}, {31, 63, 255, 191}, {0, 191, 0, 191}},	// T, CT, Any
 					KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
@@ -40,7 +43,8 @@ char sCvarPath[PLATFORM_MAX_PATH],
 	sSoundPath[PLATFORM_MAX_PATH];
 
 bool bAllowed = true,
-	bCSGO;
+	bCSGO,
+	bOldShit;
 int iOffsetGroup,
 	hBeam = -1,
 	hHalo = -1,
@@ -63,8 +67,8 @@ public Plugin myinfo =
 public void OnPluginStart()
 {
 	EngineVersion EV = GetEngineVersion();
-	if(EV == Engine_CSGO) bCSGO = true;
-	else if(EV != Engine_CSS) SetFailState("Plugin for CSS and CSGO only!");
+	bCSGO = EV == Engine_CSGO;
+	bOldShit = !bCSGO && EV != Engine_CSS;
 
 	iOffsetGroup	= FindSendPropInfo("CBaseEntity", "m_CollisionGroup");
 
@@ -89,7 +93,7 @@ public void OnPluginStart()
 	(CVar = CreateConVar("sm_revival_percent", "1", "Enable/disable save the percentage of reviving", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Percent);
 	bPercent = CVar.BoolValue;
 
-	(CVar = CreateConVar("sm_revival_effect", "1", "Enable/disable effect around to place of death", _, true, _, true, 1.0)).AddChangeHook(CVarChanged_Enable);
+	(CVar = CreateConVar("sm_revival_effect", "1", "Enable/disable effect around to place of death", _, true, _, true, 1.0)).AddChangeHook(CVarChanged_Effect);
 	bEffect = CVar.BoolValue;
 
 	(CVar = CreateConVar("sm_revival_radius", "200.0", "Radius to respawn death player", FCVAR_NOTIFY, true)).AddChangeHook(CVarChanged_Radius);
@@ -398,7 +402,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			CreateEffect(client, target);
 		}
 
-		if(target)
+		if(target && IsClientConnected(target))
 		{
 			reset[client] = false;
 			if(target != old_target[client])
@@ -441,7 +445,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		SendProgressBar(client, old_target[client]);
 		GetClientName(old_target[client], name, sizeof(name));
 		PrintToChat(client, "%t%t", "ChatTag", "RevivingStopped", name, RoundToNearest((FloatSub(time, start[client])/iCD)*100));
-		old_target[client] = 0;		// 
+		old_target[client] = 0;
 	}
 	old_buttons[client] = buttons;
 	return Plugin_Continue;
@@ -467,7 +471,7 @@ stock void CreateMark(int client)
 	}
 	else if((ent = CreateEntityByName("env_sprite")) != -1)
 	{
-		DispatchKeyValue(ent, "model", MARK_MDL);
+		DispatchKeyValue(ent, "model", bOldShit ? MARK_MDL2 : MARK_MDL1);
 		DispatchKeyValue(ent, "classname", "death_mark");
 		DispatchKeyValue(ent, "spawnflags", "1");
 		DispatchKeyValueFloat(ent, "scale", MARK_SIZE);
@@ -553,6 +557,7 @@ stock Action InitRespawn(int client, int target)
 
 	HideMark(client);
 	ResetPercents(client);
+	SendProgressBar(client, target);
 
 	static int buffer;
 	if(bEnemy && (buffer = GetClientTeam(client)) != iDeathTeam[target]) CS_SwitchTeam(target, buffer);
