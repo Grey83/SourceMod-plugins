@@ -11,23 +11,44 @@
 	#include <sdktools_variant_t>
 #endif
 
-static const char	PLUGIN_NAME[]		= "Revival",
-					PLUGIN_VERSION[]	= "1.0.5",
+static const char
+	PLUGIN_NAME[]		= "Revival",
+	PLUGIN_VERSION[]	= "1.0.7",
 
-					MARK_MDL1[]			= "hud/scoreboard_dead.vmt",
-					MARK_MDL2[]			= "sprites/glow.vmt",
-					KEY_NAME[][]		= {"Ctrl", "E", "Shift"};
-static const int	COLOR[][]	= {{255, 63, 31, 191}, {31, 63, 255, 191}, {0, 191, 0, 191}},	// T, CT, Any
-					KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
-static const float	NULL_PERCENT[MAXPLAYERS+1]	= {0.0, ...},
-					EFF_LIFE	= 1.0,	// частота обновления эффекта
-					MARK_SIZE	= 0.3;	// размер меток
+	MARK_MDL1[]			= "hud/scoreboard_dead.vmt",
+	MARK_MDL2[]			= "sprites/glow.vmt",
+	KEY_NAME[][]		= {"Ctrl", "E", "Shift"},
+	CLR[][][]	=
+{
+	{"{DEFAULT}", "{TEAM}", "{GREEN}", "{WHITE}", "{RED}", "{LIME}", "{LIGHTGREEN}", "{LIGHTRED}", "{GRAY}", "{LIGHTOLIVE}", "{OLIVE}", "{BLUEGREY}", "{LIGHTBLUE}", "{BLUE}", "{PURPLE}", "{LIGHTRED2}"},
+	{"\x01", "\x03", "\x04", "\x01", "\x02", "\x05", "\x06", "\x07", "\x08", "\x09", "\x10", "\x0A", "\x0B", "\x0C", "\x0E", "\x0F"},
+	{"\x01", "\x03", "\x0700AD00", "\x07FFFFFF", "\x07FF0000", "\x0700FF00", "\x0799FF99", "\x07FF4040", "\x07CCCCCC", "\x07FFBD6B", "\x07FA8B00", "\x076699CC", "\x0799CCFF", "\x073D46FF", "\x07FA00FA", "\x07FF8080"},
+	{"\x01", "\x03", "\x04", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+};
+
+static const int
+	COLOR[][]	= {{255, 63, 31, 191}, {31, 63, 255, 191}, {0, 191, 0, 191}},	// T, CT, Any
+	KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
+static const float
+	NULL_PERCENT[MAXPLAYERS+1]	= {0.0, ...},
+	EFF_LIFE	= 1.0,	// частота обновления эффекта
+	MARK_SIZE	= 0.3;	// размер меток
+
+enum
+{
+	E_Unknown,
+	E_CSGO,
+	E_CSS,
+	E_Old
+};
 
 bool bEnable,
+	bTip,
 	bTeam,
 	bEnemy,
 	bPercent,
 	bEffect,
+	bDeath,
 	bFrag,
 	bSprites;
 float fRadius;
@@ -43,9 +64,9 @@ char sCvarPath[PLATFORM_MAX_PATH],
 	sSoundPath[PLATFORM_MAX_PATH];
 
 bool bAllowed = true,
-	bCSGO,
-	bOldShit;
-int iOffsetGroup,
+	bProto;
+int iEngine,
+	iOffsetGroup,
 	hBeam = -1,
 	hHalo = -1,
 	iMarkRef[MAXPLAYERS+1] = {-1, ...},
@@ -66,9 +87,17 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
-	EngineVersion EV = GetEngineVersion();
-	bCSGO = EV == Engine_CSGO;
-	bOldShit = !bCSGO && EV != Engine_CSS;
+	bProto = GetFeatureStatus(FeatureType_Native, "GetUserMessageType") == FeatureStatus_Available && GetUserMessageType() == UM_Protobuf;
+
+	switch(GetEngineVersion())
+	{
+		case Engine_CSGO:
+			iEngine = E_CSGO;
+		case Engine_CSS, Engine_HL2DM, Engine_DODS:
+			iEngine = E_CSS;
+		case Engine_SourceSDK2006:
+			iEngine = E_Old;
+	}
 
 	iOffsetGroup	= FindSendPropInfo("CBaseEntity", "m_CollisionGroup");
 
@@ -77,6 +106,9 @@ public void OnPluginStart()
 	ConVar CVar;
 	(CVar = CreateConVar("sm_revival_enabled", "1", "Enable/disable plugin", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Enable);
 	bEnable = CVar.BoolValue;
+
+	(CVar = CreateConVar("sm_revival_tip", "1", "Enable/disable key tip at the beginning of the round", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Tip);
+	bTip = CVar.BoolValue;
 
 	(CVar = CreateConVar("sm_revival_key", "1", "Key for reviving (0 - 'duck', 1 - 'use', 2 - 'walk')", _, true, _, true, 2.0)).AddChangeHook(CVarChanged_Key);
 	iKey = CVar.IntValue;
@@ -111,8 +143,11 @@ public void OnPluginStart()
 	(CVar = CreateConVar("sm_revival_noblock_time", "2", "Noblocking time after respawn(set at 0 if you have any noblock plugin)", _, true)).AddChangeHook(CVarChanged_NoBlockTime);
 	iNoBlockTime = CVar.IntValue;
 
-	(CVar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn", FCVAR_NOTIFY, true)).AddChangeHook(CVarChanged_HPCost);
+	(CVar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others", FCVAR_NOTIFY, true)).AddChangeHook(CVarChanged_HPCost);
 	iHPCost = CVar.IntValue;
+
+	(CVar = CreateConVar("sm_revival_death", "1", "Can a player revive others if he have less HP than needed for reviving", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Death);
+	bDeath = CVar.BoolValue;
 
 	(CVar = CreateConVar("sm_revival_health", "100", "How many HP will get revived player", FCVAR_NOTIFY, true, 25.0)).AddChangeHook(CVarChanged_HP);
 	iHP = CVar.IntValue;
@@ -141,13 +176,18 @@ public void OnPluginEnd()
 public void CVarChanged_Enable(ConVar CVar, const char[] oldVal, const char[] newVal)
 {
 	bEnable = CVar.BoolValue;
-	PrintToChatAll("%T%T", "ChatTag", LANG_SERVER, bEnable ? "Enabled" : "Disabled", LANG_SERVER);
+	PrintToChatAllClr("%T%T", "ChatTag", LANG_SERVER, bEnable ? "Enabled" : "Disabled", LANG_SERVER);
+}
+
+public void CVarChanged_Tip(ConVar CVar, const char[] oldVal, const char[] newVal)
+{
+	bTip = CVar.BoolValue;
 }
 
 public void CVarChanged_Key(ConVar CVar, const char[] oldVal, const char[] newVal)
 {
 	iKey = CVar.IntValue;
-	PrintToChatAll("%T%T", "ChatTag", LANG_SERVER, "KeyTip", LANG_SERVER, KEY_NAME[iKey]);
+	PrintToChatAllClr("%T%T", "ChatTag", LANG_SERVER, "KeyTip", LANG_SERVER, KEY_NAME[iKey]);
 }
 
 public void CVarChanged_Clean(ConVar CVar, const char[] oldVal, const char[] newVal)
@@ -210,6 +250,11 @@ public void CVarChanged_HPCost(ConVar CVar, const char[] oldVal, const char[] ne
 	iHPCost = CVar.IntValue;
 }
 
+public void CVarChanged_Death(ConVar CVar, const char[] oldVal, const char[] newVal)
+{
+	bDeath = CVar.BoolValue;
+}
+
 public void CVarChanged_HP(ConVar CVar, const char[] oldVal, const char[] newVal)
 {
 	iHP = CVar.IntValue;
@@ -252,7 +297,7 @@ public void OnMapStart()
 		return;
 	}
 
-	if(bCSGO)
+	if(iEngine == E_CSGO)
 	{
 		FormatEx(sSoundPath, sizeof(sSoundPath), "*%s", sCvarPath);
 		AddToStringTable(FindStringTable("soundprecache"), sSoundPath);
@@ -338,7 +383,7 @@ public Action Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 public Action Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	bAllowed = true;
-	if(bEnable) PrintToChatAll("%t%t", "ChatTag", "KeyTip", KEY_NAME[iKey]);
+	if(bEnable && bTip) PrintToChatAllClr("%t%t", "ChatTag", "KeyTip", KEY_NAME[iKey]);
 
 	return Plugin_Continue;
 }
@@ -373,7 +418,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		SendProgressBar(client);
 	}
 
-	static int target, old_buttons[MAXPLAYERS+1];
+	static int target[MAXPLAYERS+1], old_buttons[MAXPLAYERS+1];
 	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1];
 	static char name[MAX_NAME_LENGTH];
 	time = GetGameTime();
@@ -381,7 +426,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	{
 		static int iOffsetVel_0 = -1, iOffsetVel_1 = -1, iOffsetVel_2 = -1;
 		if(!old_target[client] || !iDeathTeam[old_target[client]])
-			target = GetNearestTarget(client);
+			target[client] = GetNearestTarget(client);
 		else if((iOffsetVel_0 != -1 || (iOffsetVel_0 = FindSendPropInfo("CCSPlayer", "m_vecVelocity[0]")) != -1)
 		&& GetEntDataFloat(client, iOffsetVel_0)
 		|| (iOffsetVel_1 != -1 || (iOffsetVel_1	= FindSendPropInfo("CCSPlayer", "m_vecVelocity[1]")) != -1)
@@ -392,41 +437,41 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			static float pos[3];
 			GetClientAbsOrigin(client, pos);
 			if(FloatCompare(fRadius, GetVectorDistance(pos, fDeathPos[old_target[client]])) == -1)
-				target = GetNearestTarget(client);
+				target[client] = GetNearestTarget(client);
 		}
-		else target = old_target[client];
+		else target[client] = old_target[client];
 
-		if(FloatCompare(FloatSub(time, effect_time[client]), EFF_LIFE) != -1 || target != old_target[client])
+		if(FloatCompare(FloatSub(time, effect_time[client]), EFF_LIFE) != -1 || target[client] != old_target[client])
 		{
 			effect_time[client] = time;
-			CreateEffect(client, target);
+			CreateEffect(client, target[client]);
 		}
 
-		if(target && IsClientConnected(target))
+		if(target[client] && IsClientConnected(target[client]))
 		{
 			reset[client] = false;
-			if(target != old_target[client])
+			if(target[client] != old_target[client])
 			{
 				SaveProgress(client, old_target[client], FloatSub(time, start[client]));
-				start[client] = FloatSub(time, fProgress[client][target]);
-				old_target[client] = target;
+				start[client] = FloatSub(time, fProgress[client][target[client]]);
+				old_target[client] = target[client];
 
-				SendProgressBar(client, target, start[client]);
+				SendProgressBar(client, target[client], start[client]);
 
-				GetClientName(target, name, sizeof(name));
-				PrintToChat(client, "%t%t", "ChatTag", "YouReviving", name);
+				GetClientName(target[client], name, sizeof(name));
+				PrintToChatClr(client, "%t%t", "ChatTag", "YouReviving", name);
 				if(iHPCost)
 				{
 					static int newHP;
 					if((newHP = GetClientHealth(client) - iHPCost) < 1)
-						PrintToChat(client, "%t", "ReviveCostDeath");
-					else PrintToChat(client, "%t", "ReviveCostHealth", newHP);
+						PrintToChatClr(client, "%t", "ReviveCostDeath");
+					else PrintToChatClr(client, "%t", "ReviveCostHealth", newHP);
 				}
 
 				GetClientName(client, name, sizeof(name));
-				PrintToChat(target, "%t%t", "ChatTag", "YouRevivingBy", name);
+				PrintToChatClr(target[client], "%t%t", "ChatTag", "YouRevivingBy", name);
 			}
-			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target);
+			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client]);
 		}
 		else
 		{
@@ -444,7 +489,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		SaveProgress(client, old_target[client], FloatSub(time, start[client]));
 		SendProgressBar(client, old_target[client]);
 		GetClientName(old_target[client], name, sizeof(name));
-		PrintToChat(client, "%t%t", "ChatTag", "RevivingStopped", name, RoundToNearest((FloatSub(time, start[client])/iCD)*100));
+		PrintToChatClr(client, "%t%t", "ChatTag", "RevivingStopped", name, RoundToNearest((FloatSub(time, start[client])/iCD)*100));
 		old_target[client] = 0;
 	}
 	old_buttons[client] = buttons;
@@ -471,7 +516,7 @@ stock void CreateMark(int client)
 	}
 	else if((ent = CreateEntityByName("env_sprite")) != -1)
 	{
-		DispatchKeyValue(ent, "model", bOldShit ? MARK_MDL2 : MARK_MDL1);
+		DispatchKeyValue(ent, "model", iEngine == E_Old ? MARK_MDL2 : MARK_MDL1);
 		DispatchKeyValue(ent, "classname", "death_mark");
 		DispatchKeyValue(ent, "spawnflags", "1");
 		DispatchKeyValueFloat(ent, "scale", MARK_SIZE);
@@ -527,6 +572,8 @@ stock void ResetPercents(int client)
 
 stock int GetNearestTarget(int client)
 {
+	if(!IsPlayerAlive(client) || !bDeath && GetClientHealth(client) <= iHPCost) return 0;
+
 	static int i, team, target;
 	static float pos[3], dist[MAXPLAYERS], min_dist;
 	if(!bEnemy) team = GetClientTeam(client);
@@ -552,7 +599,7 @@ stock void SaveProgress(const int client, const int target, const float value)
 
 stock Action InitRespawn(int client, int target)
 {
-	if(!IsPlayerAlive(client) || !target || !IsClientInGame(target) || IsPlayerAlive(target))	// не факт что необходима
+	if(!IsPlayerAlive(client) || !IsClientValid(target))	// не факт что необходима
 		return Plugin_Handled;
 
 	HideMark(client);
@@ -560,6 +607,15 @@ stock Action InitRespawn(int client, int target)
 	SendProgressBar(client, target);
 
 	static int buffer;
+	if((buffer = GetClientHealth(client) - iHPCost) < 1 && !bDeath)
+	{
+		PrintToChatClr(client, "%t%t", "ChatTag", "NotEnoughHP");
+		return Plugin_Handled;
+	}
+
+	if(buffer > 0) SetEntityHealth(client, buffer);
+	else ForcePlayerSuicide(client);
+
 	if(bEnemy && (buffer = GetClientTeam(client)) != iDeathTeam[target]) CS_SwitchTeam(target, buffer);
 	CS_RespawnPlayer(target);
 	TeleportEntity(target, fDeathPos[target], NULL_VECTOR, NULL_VECTOR);
@@ -569,13 +625,10 @@ stock Action InitRespawn(int client, int target)
 	if((buffer = GetEntProp(target, Prop_Data, "m_iDeaths")) > 0) SetEntProp(target, Prop_Data, "m_iDeaths", buffer-1);
 	if(bFrag) SetEntProp(client, Prop_Data, "m_iFrags", GetEntProp(client, Prop_Data, "m_iFrags")+1);
 	GetClientName(target, name, sizeof(name));
-	PrintToChat(client, "%t%t", "ChatTag", bFrag ? "TargetRevivedFrag" : "TargetRevived", name);
+	PrintToChatClr(client, "%t%t", "ChatTag", bFrag ? "TargetRevivedFrag" : "TargetRevived", name);
 	GetClientName(client, name, sizeof(name));
-	PrintToChat(target, "%t%t", "ChatTag", "YouRevived", target, name);
+	PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", target, name);
 	if(sSoundPath[0]) EmitAmbientSound(sSoundPath, fDeathPos[target]);
-
-	if((buffer = GetClientHealth(client) - iHPCost) > 0) SetEntityHealth(client, buffer);
-	else ForcePlayerSuicide(client);
 
 	if(iNoBlockTime && iOffsetGroup != -1)
 	{
@@ -586,15 +639,15 @@ stock Action InitRespawn(int client, int target)
 	if(!iTimes) return Plugin_Handled;
 
 	iTimesRevived[client]++;
-	if(iTimesRevived[client] >= iTimes) PrintToChat(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
-	else PrintToChat(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iTimesRevived[client]);
+	if(iTimesRevived[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
+	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iTimesRevived[client]);
 
 	return Plugin_Handled;
 }
 
 stock void SendProgressBar(const int client, const int target = 0, const float time = 0.0)
 {
-	if(!IsClientInGame(client) || IsFakeClient(client)) return;
+	if(!IsClientValid(client)) return;
 
 	static int iOffsetStart = -1, iOffsetDuration = -1;
 	if(iOffsetStart == -1 && (iOffsetStart = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) == -1)
@@ -608,7 +661,7 @@ stock void SendProgressBar(const int client, const int target = 0, const float t
 	SetEntDataFloat(client, iOffsetStart, time, true);
 	SetEntData(client, iOffsetDuration, duration, true);
 
-	if(!target || !IsClientInGame(target) || IsFakeClient(target)) return;
+	if(!IsClientValid(target)) return;
 	SetEntDataFloat(target, iOffsetStart, time, true);
 	SetEntData(target, iOffsetDuration, duration, true);
 }
@@ -622,7 +675,7 @@ stock void CreateEffect(const int client, const int target)
 	if(target)
 	{
 		for(i = 1, num = 0; i <= MaxClients; i++)
-			if(IsClientInGame(i) && !IsFakeClient(i) && (bEnemy || team == GetClientTeam(i))) clients[num++] = i;
+			if(IsClientValid(i) && (bEnemy || team == GetClientTeam(i))) clients[num++] = i;
 		TE_SetupBeamRingTarget(target, team);
 		TE_Send(clients, num);
 	}
@@ -656,4 +709,53 @@ stock void TE_SetupBeamRingTarget(const int target, int team)
 	TE_WriteNum("m_nSpeed", 1);
 	TE_WriteNum("m_nFlags", 0);
 	TE_WriteNum("m_nFadeLength", 0);
+}
+
+stock void PrintToChatAllClr(const char[] msg, any ...)
+{
+	static char buffer[PLATFORM_MAX_PATH];
+	for(int i = 1; i <= MaxClients; i++) if(IsClientValid(i))
+	{
+		VFormat(buffer, sizeof(buffer), msg, 2);
+		PrintToChatClr(i, "%s", buffer);
+	}
+}
+
+stock void PrintToChatClr(int client, const char[] msg, any ...)
+{
+	if(!IsClientValid(client)) return;
+
+	Handle hBuffer = StartMessageOne("SayText2", client, USERMSG_RELIABLE|USERMSG_BLOCKHOOKS);
+	if(!hBuffer) return;
+
+	SetGlobalTransTarget(client);
+	static char buffer[PLATFORM_MAX_PATH], new_msg[PLATFORM_MAX_PATH];
+	if(iEngine != E_Unknown) FormatEx(buffer, sizeof(buffer), "%s\x01 %s", iEngine == E_CSGO ? " " : "", msg);
+	VFormat(new_msg, sizeof(new_msg), buffer, 3);
+
+	if(iEngine) for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[0][i], CLR[iEngine][i]);
+	else for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[0][i], "");
+
+	if(bProto)
+	{
+		PbSetInt(hBuffer, "ent_idx", 0);
+		PbSetBool(hBuffer, "chat", true);
+		PbSetString(hBuffer, "msg_name", new_msg);
+		PbAddString(hBuffer, "params", "");
+		PbAddString(hBuffer, "params", "");
+		PbAddString(hBuffer, "params", "");
+		PbAddString(hBuffer, "params", "");
+	}
+	else
+	{
+		BfWriteByte(hBuffer, 0);
+		BfWriteByte(hBuffer, true);
+		BfWriteString(hBuffer, new_msg);
+	}
+	EndMessage();
+}
+
+stock bool IsClientValid(int client)
+{
+	return client > 0 && client <= MaxClients && IsClientInGame(client) && !IsFakeClient(client);
 }
