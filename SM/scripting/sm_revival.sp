@@ -487,7 +487,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 				GetClientName(client, name, sizeof(name));
 				PrintToChatClr(target[client], "%t%t", "ChatTag", "YouRevivingBy", name);
 			}
-			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client]);
+			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client], diff);
 		}
 		else
 		{
@@ -613,7 +613,7 @@ stock void SaveProgress(const int client, const int target, const float value)
 	else fProgress[client][target] = 0.0;
 }
 
-stock Action InitRespawn(int client, int target)
+stock Action InitRespawn(int client, int target, int hp)
 {
 	if(!IsPlayerAlive(client) || !IsClientValid(target, true))	// не факт что необходима
 		return Plugin_Handled;
@@ -637,7 +637,11 @@ stock Action InitRespawn(int client, int target)
 	PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", target, name);
 	if(sSoundPath[0]) EmitAmbientSound(sSoundPath, fDeathPos[target]);
 
-	SetEntityHealth(client, GetClientHealth(client) - iHPCost);
+	if(iHPCost)
+	{
+		if(hp > 0) SetEntityHealth(client, hp);
+		else ForcePlayerSuicide(client);
+	}
 
 	if(iNoBlockTime && iOffsetGroup != -1)
 	{
