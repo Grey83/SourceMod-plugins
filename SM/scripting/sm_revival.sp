@@ -13,17 +13,29 @@
 
 static const char
 	PLUGIN_NAME[]		= "Revival",
-	PLUGIN_VERSION[]	= "1.0.8",
+	PLUGIN_VERSION[]	= "1.0.9",
 
 	MARK_MDL1[]			= "hud/scoreboard_dead.vmt",
 	MARK_MDL2[]			= "sprites/glow.vmt",
 	KEY_NAME[][]		= {"Ctrl", "E", "Shift"},
 	CLR[][][]	=
-{
-	{"{DEFAULT}", "{TEAM}", "{GREEN}", "{WHITE}", "{RED}", "{LIME}", "{LIGHTGREEN}", "{LIGHTRED}", "{GRAY}", "{LIGHTOLIVE}", "{OLIVE}", "{BLUEGREY}", "{LIGHTBLUE}", "{BLUE}", "{PURPLE}", "{LIGHTRED2}"},
-	{"\x01", "\x03", "\x04", "\x01", "\x02", "\x05", "\x06", "\x07", "\x08", "\x09", "\x10", "\x0A", "\x0B", "\x0C", "\x0E", "\x0F"},
-	{"\x01", "\x03", "\x0700AD00", "\x07FFFFFF", "\x07FF0000", "\x0700FF00", "\x0799FF99", "\x07FF4040", "\x07CCCCCC", "\x07FFBD6B", "\x07FA8B00", "\x076699CC", "\x0799CCFF", "\x073D46FF", "\x07FA00FA", "\x07FF8080"},
-	{"\x01", "\x03", "\x04", "", "", "", "", "", "", "", "", "", "", "", "", ""}
+{//		name		CSGO		CSS			CSSv34
+	{"{DEFAULT}",	"\x01",	"\x01",			"\x01"},
+	{"{TEAM}",		"\x03",	"\x03",			"\x03"},
+	{"{GREEN}",		"\x04",	"\x0700AD00",	"\x04"},
+	{"{WHITE}",		"\x01",	"\x07FFFFFF",	""},
+	{"{RED}",		"\x02",	"\x07FF0000",	""},
+	{"{LIME}",		"\x05",	"\x0700FF00",	""},
+	{"{LIGHTGREEN}","\x06",	"\x0799FF99",	""},
+	{"{LIGHTRED}",	"\x07",	"\x07FF4040",	""},
+	{"{GRAY}",		"\x08",	"\x07CCCCCC",	""},
+	{"{LIGHTOLIVE}","\x09",	"\x07FFBD6B",	""},
+	{"{OLIVE}",		"\x10",	"\x07FA8B00",	""},
+	{"{BLUEGREY}",	"\x0A",	"\x076699CC",	""},
+	{"{LIGHTBLUE}",	"\x0B",	"\x0799CCFF",	""},
+	{"{BLUE}",		"\x0C",	"\x073D46FF",	""},
+	{"{PURPLE}",	"\x0E",	"\x07FA00FA",	""},
+	{"{LIGHTRED2}",	"\x0F",	"\x07FF8080",	""}
 };
 
 static const int
@@ -44,8 +56,10 @@ enum
 
 bool bEnable,
 	bTip,
+	bMsg,
 	bTeam,
 	bEnemy,
+	bBar,
 	bPercent,
 	bEffect,
 	bDeath,
@@ -72,7 +86,9 @@ int iEngine,
 	hHalo = -1,
 	iMarkRef[MAXPLAYERS+1] = {-1, ...},
 	iTimesRevived[MAXPLAYERS+1],
-	iDeathTeam[MAXPLAYERS+1];
+	iDeathTeam[MAXPLAYERS+1],
+	iTarget[MAXPLAYERS+1],
+	iReviver[MAXPLAYERS+1];
 float fDeathPos[MAXPLAYERS+1][3],
 	fProgress[MAXPLAYERS+1][MAXPLAYERS+1];
 
@@ -111,6 +127,9 @@ public void OnPluginStart()
 	(CVar = CreateConVar("sm_revival_tip", "1", "Enable/disable key tip at the beginning of the round", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Tip);
 	bTip = CVar.BoolValue;
 
+	(CVar = CreateConVar("sm_revival_msg", "1", "Enable/disable chat messages", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Msg);
+	bMsg = CVar.BoolValue;
+
 	(CVar = CreateConVar("sm_revival_key", "1", "Key for reviving (0 - 'duck', 1 - 'use', 2 - 'walk')", _, true, _, true, 2.0)).AddChangeHook(CVarChanged_Key);
 	iKey = CVar.IntValue;
 
@@ -122,6 +141,9 @@ public void OnPluginStart()
 
 	(CVar = CreateConVar("sm_revival_enemy", "0", "Can a player revive the enemy (the revived player will change the team)", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Enemy);
 	bEnemy = CVar.BoolValue;
+
+	(CVar = CreateConVar("sm_revival_bar", "1", "Enable/disable progressbar for reviving", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Bar);
+	bBar = CVar.BoolValue;
 
 	(CVar = CreateConVar("sm_revival_percent", "1", "Enable/disable save the percentage of reviving", FCVAR_NOTIFY, true, _, true, 1.0)).AddChangeHook(CVarChanged_Percent);
 	bPercent = CVar.BoolValue;
@@ -188,6 +210,11 @@ public void CVarChanged_Tip(ConVar CVar, const char[] oldVal, const char[] newVa
 	bTip = CVar.BoolValue;
 }
 
+public void CVarChanged_Msg(ConVar CVar, const char[] oldVal, const char[] newVal)
+{
+	bMsg = CVar.BoolValue;
+}
+
 public void CVarChanged_Key(ConVar CVar, const char[] oldVal, const char[] newVal)
 {
 	iKey = CVar.IntValue;
@@ -212,6 +239,11 @@ public void CVarChanged_Enemy(ConVar CVar, const char[] oldVal, const char[] new
 		team = bEnemy ? 2 : iDeathTeam[i] - 2;
 		SetMarkColor(EntRefToEntIndex(iMarkRef[i]), team);
 	}
+}
+
+public void CVarChanged_Bar(ConVar CVar, const char[] oldVal, const char[] newVal)
+{
+	bBar = CVar.BoolValue;
 }
 
 public void CVarChanged_Percent(ConVar CVar, const char[] oldVal, const char[] newVal)
@@ -319,7 +351,8 @@ public void OnMapStart()
 
 public void OnClientConnected(int client)
 {
-	iTimesRevived[client] = 0;
+	iTimesRevived[client] = iTarget[client] = iReviver[client] = 0;
+	for(int i = 1; i <= MaxClients; i++) if(IsClientValid(i) && iTarget[client] == i) iTarget[client] = 0;
 }
 
 public void OnClientDisconnect(int client)
@@ -379,6 +412,7 @@ public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 	static int client;
 	if(bEnable && (client = GetClientOfUserId(event.GetInt("userid")))) HideMark(client);
 	ResetPercents(client);
+	iTarget[client] = iReviver[client] = 0;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -396,7 +430,7 @@ public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 
 stock void SendWarnNotEnough(int client, bool &val)
 {
-	if(val) return;
+	if(!bMsg || val) return;
 
 	val = true;
 	PrintToChatClr(client, "%t%t", "ChatTag", "NotEnoughHP");
@@ -476,16 +510,27 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 				SendProgressBar(client, target[client], start[client]);
 
-				GetClientName(target[client], name, sizeof(name));
-				PrintToChatClr(client, "%t%t", "ChatTag", "YouReviving", name);
-				if(iHPCost)
+				if(bMsg)
 				{
-					if(diff < 1) PrintToChatClr(client, "%t", "ReviveCostDeath");
-					else PrintToChatClr(client, "%t", "ReviveCostHealth", diff);
-				}
+					if(iTarget[client] != target[client])
+					{
+						GetClientName(target[client], name, sizeof(name));
+						PrintToChatClr(client, "%t%t", "ChatTag", "YouReviving", name);
+						if(iReviver[target[client]] != client)
+						{
+							GetClientName(client, name, sizeof(name));
+							PrintToChatClr(target[client], "%t%t", "ChatTag", "YouRevivingBy", name);
+						}
+					}
 
-				GetClientName(client, name, sizeof(name));
-				PrintToChatClr(target[client], "%t%t", "ChatTag", "YouRevivingBy", name);
+					if(iHPCost)
+					{
+						if(diff < 1) PrintToChatClr(client, "%t", "ReviveCostDeath");
+						else PrintToChatClr(client, "%t", "ReviveCostHealth", diff);
+					}
+				}
+				iReviver[target[client]] = client;
+				iTarget[client] = target[client];
 			}
 			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client], diff);
 		}
@@ -504,8 +549,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		reset[client] = true;
 		SaveProgress(client, old_target[client], FloatSub(time, start[client]));
 		SendProgressBar(client, old_target[client]);
-		GetClientName(old_target[client], name, sizeof(name));
-		PrintToChatClr(client, "%t%t", "ChatTag", "RevivingStopped", name, RoundToNearest((FloatSub(time, start[client])/iCD)*100));
+		if(bMsg)
+		{
+			GetClientName(old_target[client], name, sizeof(name));
+			PrintToChatClr(client, "%t%t", "ChatTag", "RevivingStopped", name, RoundToNearest((FloatSub(time, start[client])/iCD)*100));
+		}
 		old_target[client] = 0;
 	}
 	old_buttons[client] = buttons;
@@ -562,7 +610,7 @@ stock void ResetRespawnData(int client)
 {
 	SendProgressBar(client);
 	fProgress[client] = NULL_PERCENT;
-	iTimesRevived[client] = iDeathTeam[client] = 0;
+	iTimesRevived[client] = iDeathTeam[client] = iTarget[client] = iReviver[client] = 0;
 	HideMark(client);
 }
 
@@ -621,6 +669,7 @@ stock Action InitRespawn(int client, int target, int hp)
 	HideMark(client);
 	ResetPercents(client);
 	SendProgressBar(client, target);
+	iTarget[client] = iReviver[target] = 0;
 
 	static int buffer;
 	if(bEnemy && (buffer = GetClientTeam(client)) != iDeathTeam[target]) CS_SwitchTeam(target, buffer);
@@ -631,10 +680,13 @@ stock Action InitRespawn(int client, int target, int hp)
 	static char name[MAX_NAME_LENGTH];
 	if((buffer = GetEntProp(target, Prop_Data, "m_iDeaths")) > 0) SetEntProp(target, Prop_Data, "m_iDeaths", buffer-1);
 	if(iFrag) SetEntProp(client, Prop_Data, "m_iFrags", GetEntProp(client, Prop_Data, "m_iFrags")+iFrag);
-	GetClientName(target, name, sizeof(name));
-	PrintToChatClr(client, "%t%t", "ChatTag", iFrag ? "TargetRevivedFrag" : "TargetRevived", name);
-	GetClientName(client, name, sizeof(name));
-	PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", target, name);
+	if(bMsg)
+	{
+		GetClientName(target, name, sizeof(name));
+		PrintToChatClr(client, "%t%t", "ChatTag", iFrag ? "TargetRevivedFrag" : "TargetRevived", name);
+		GetClientName(client, name, sizeof(name));
+		PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", target, name);
+	}
 	if(sSoundPath[0]) EmitAmbientSound(sSoundPath, fDeathPos[target]);
 
 	if(iHPCost)
@@ -652,6 +704,8 @@ stock Action InitRespawn(int client, int target, int hp)
 	if(!iTimes) return Plugin_Handled;
 
 	iTimesRevived[client]++;
+	if(!bMsg) return Plugin_Handled;
+
 	if(iTimesRevived[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
 	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iTimesRevived[client]);
 
@@ -660,7 +714,7 @@ stock Action InitRespawn(int client, int target, int hp)
 
 stock void SendProgressBar(const int client, const int target = 0, const float time = 0.0)
 {
-	if(!IsClientValid(client)) return;
+	if(!bBar || iEngine == E_CSGO || !IsClientValid(client)) return;
 
 	static int iOffsetStart = -1, iOffsetDuration = -1;
 	if(iOffsetStart == -1 && (iOffsetStart = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) == -1)
@@ -746,8 +800,8 @@ stock void PrintToChatClr(int client, const char[] msg, any ...)
 	if(iEngine != E_Unknown) FormatEx(buffer, sizeof(buffer), "%s\x01 %s", iEngine == E_CSGO ? " " : "", msg);
 	VFormat(new_msg, sizeof(new_msg), buffer, 3);
 
-	if(iEngine) for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[0][i], CLR[iEngine][i]);
-	else for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[0][i], "");
+	if(iEngine) for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[i][0], CLR[i][iEngine]);
+	else for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[i][0], "");
 
 	if(bProto)
 	{
