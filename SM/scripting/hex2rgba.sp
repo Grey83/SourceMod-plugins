@@ -39,7 +39,7 @@ stock int IsColorValid(const char[] buffer)
 		if(!(buffer[i] >= '0' && buffer[i] <= '9')
 		&& !(buffer[i] >= 'A' && buffer[i] <= 'F')
 		&& !(buffer[i] >= 'a' && buffer[i] <= 'f'))
-			return false;
+			return 0;
 		i++;
 	}
 	return i == 3 || i == 4 || i == 6 || i == 8 ? i : 0;
