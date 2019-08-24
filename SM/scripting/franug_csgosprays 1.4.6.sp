@@ -25,7 +25,11 @@
 #include <sdktools_tempents>
 #include <sdktools_trace>
 
-static const String:SND[] = "*items/spraycan_spray.wav";
+static const
+	String:PL_NAME[]= "SM Franug CSGO Sprays",
+	String:PL_VER[]	= "1.4.6",
+
+	String:SND[]	= "*items/spraycan_spray.wav";
 
 #define MAX_SPRAYS 128
 #define MAX_MAP_SPRAYS 200
@@ -67,14 +71,13 @@ new g_sprays[MAX_SPRAYS][Listado],
 	g_sprayIndexLast;
 
 
-#define PLUGIN "1.4.6"
 
 public Plugin:myinfo =
 {
-	name		= "SM Franug CSGO Sprays",
-	version		= PLUGIN,
+	name		= PL_NAME,
+	version		= PL_VER,
 	description	= "Use sprays in CSGO",
-	author		= "Franc1sco Steam: franug",
+	author		= "Franc1sco Steam: franug (rewritten by Grey83)",
 	url			= "http://steamcommunity.com/id/franug"
 };
 
@@ -82,7 +85,7 @@ public OnPluginStart()
 {
 	if(GetEngineVersion() != Engine_CSGO) SetFailState("Plugin for CS:GO only!");
 
-	CreateConVar("sm_franugsprays_version", PLUGIN, "SM Franug CSGO Sprays", FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("sm_franugsprays_version", PL_VER, PL_NAME, FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	h_time = CreateConVar("sm_csgosprays_time", "30", "Cooldown between sprays", _, true, 5.0);
 	HookConVarChange(h_time, OnConVarChanged);
@@ -136,7 +139,7 @@ public OnClientDisconnect(client)
 	if(AreClientCookiesCached(client))
 	{
 		new String:SprayString[12];
-		Format(SprayString, sizeof(SprayString), "%i", g_sprayElegido[client]);
+		FormatEx(SprayString, sizeof(SprayString), "%i", g_sprayElegido[client]);
 		SetClientCookie(client, c_GameSprays, SprayString);
 	}
 }
@@ -172,9 +175,9 @@ public Action:roundStart(Handle:event, const String:name[], bool:dontBroadcast)
 
 }
 
-public OnClientPostAdminCheck(iClient)
+public OnClientPostAdminCheck(client)
 {
-	g_iLastSprayed[iClient] = false;
+	g_iLastSprayed[client] = false;
 }
 
 public OnMapStart()
@@ -184,6 +187,7 @@ public OnMapStart()
 
 	decl String:path[PLATFORM_MAX_PATH];
 	g_sprayCount = 1;
+	FormatEx(g_sprays[0][Nombre], 32, "Случайный рисунок");
 
 	new Handle:kv = CreateKeyValues("Sprays");
 	BuildPath(Path_SM, path, sizeof(path), "configs/csgo_sprays.cfg");
@@ -200,20 +204,20 @@ public OnMapStart()
 	while(KvGotoNextKey(kv))
 	{
 		KvGetSectionName(kv, buffer, sizeof(buffer));
-		Format(g_sprays[g_sprayCount][Nombre], 32, "%s", buffer);
+		FormatEx(g_sprays[g_sprayCount][Nombre], 32, buffer);
 		KvGetString(kv, "path", buffer, sizeof(buffer));
 
 		g_sprays[g_sprayCount][index] = PrecacheDecal(buffer, true);
 
-		Format(path, sizeof(path), buffer);
-		Format(download, sizeof(download), "materials/%s.vmt", buffer);
+		FormatEx(path, sizeof(path), buffer);
+		FormatEx(download, sizeof(download), "materials/%s.vmt", buffer);
 		AddFileToDownloadsTable(download);
 
 		vtf = CreateKeyValues("LightmappedGeneric");
 		FileToKeyValues(vtf, download);
 		KvGetString(vtf, "$basetexture", buffer, sizeof(buffer), buffer);
 		CloseHandle(vtf);
-		Format(download, sizeof(download), "materials/%s.vtf", buffer);
+		FormatEx(download, sizeof(download), "materials/%s.vtf", buffer);
 		AddFileToDownloadsTable(download);
 
 		g_sprayCount++;
@@ -223,100 +227,45 @@ public OnMapStart()
 	for(new i = g_sprayCount; i < MAX_SPRAYS; ++i) g_sprays[i][index] = 0;
 }
 
-public Action:MakeSpray(iClient, args)
+public Action:MakeSpray(client, args)
 {
-	if(!iClient || !IsClientInGame(iClient))
+	if(!client || !IsClientInGame(client))
 		return Plugin_Continue;
 
-	if(!IsPlayerAlive(iClient))
-	{
-		if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Вы \x07должны быть живы\x01, чтобы использовать эту команду!");
-		return Plugin_Handled;
-	}
+	if(IsPlayerAlive(client)) PlaceSpray(client);
+	else if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Вы \x07должны быть живы\x01, чтобы использовать эту команду!");
 
-	new iTime = GetTime();
-	new restante =(iTime - g_iLastSprayed[iClient]);
-
-	if(restante < g_time)
-	{
-		if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Вам нужно подождать \x07%i \x01секунд, чтобы снова использовать эту команду!", g_time-restante);
-		return Plugin_Handled;
-	}
-
-	decl Float:fClientEyePosition[3], Float:fClientEyeViewPoint[3], Float:fVector[3];
-	GetClientEyePosition(iClient, fClientEyePosition);
-	GetPlayerEyeViewPoint(iClient, fClientEyeViewPoint, fClientEyePosition);
-	MakeVectorFromPoints(fClientEyeViewPoint, fClientEyePosition, fVector);
-
-	if(GetVectorLength(fVector) > g_distance)
-	{
-		if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Вы \x07слишком далеко \x01от стены, чтобы использовать эту команду!");
-		return Plugin_Handled;
-	}
-
-	if(!g_sprayElegido[iClient])
-		TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[GetRandomInt(1, g_sprayCount-1)][index]);
-	else
-	{
-		if(!g_sprays[g_sprayElegido[iClient]][index])
-		{
-			if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Ваш граффити \x07не работает\x01, выберите другой.");
-			return Plugin_Handled;
-		}
-		TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[g_sprayElegido[iClient]][index]);
-
-		// Save spray position and identifier
-		if(g_sprayIndexLast == g_maxMapSprays) g_sprayIndexLast = 0;
-		g_spraysMapPos[g_sprayIndexLast] = fClientEyeViewPoint;
-		g_spraysMapId[g_sprayIndexLast] = g_sprays[g_sprayElegido[iClient]][index];
-		g_sprayIndexLast++;
-		if(g_sprayMapCount != g_maxMapSprays) g_sprayMapCount++;
-	}
-	TE_SendToAll();
-
-	EmitSoundToAll(SND, iClient, SNDCHAN_AUTO, SNDLEVEL_NORMAL, SND_NOFLAGS, 0.6);
-
-	g_iLastSprayed[iClient] = iTime;
 	return Plugin_Handled;
 }
 
 public Action:GetSpray(client, args)
 {
 	new Handle:menu = CreateMenu(DIDMenuHandler);
-	SetMenuTitle(menu, "Choose your Spray");
+	SetMenuTitle(menu, "Выберите граффити (%d/%d):", g_sprayElegido[client], g_sprayCount-1);
 	decl String:item[4];
-	AddMenuItem(menu, "0", "Random spray");
-	for(new i = 1; i < g_sprayCount; ++i)
+	for(new i; i < g_sprayCount; ++i)
 	{
-		FormatEx(item, 4, "%i", i);
+		FormatEx(item, 4, "%d", i);
 		AddMenuItem(menu, item, g_sprays[i][Nombre]);
 	}
 	SetMenuExitButton(menu, true);
 	DisplayMenu(menu, client, 0);
 }
 
-public DIDMenuHandler(Handle:menu, MenuAction:action, client, itemNum) 
+public DIDMenuHandler(Handle:menu, MenuAction:action, client, itemNum)
 {
 	if(action == MenuAction_Select)
 	{
-		decl String:info[4];
-
-		GetMenuItem(menu, itemNum, info, sizeof(info));
-		g_sprayElegido[client] = StringToInt(info);
-		if(g_showMsg)
-		{
-			if(!g_sprayElegido[client])
-				PrintToChat(client, " \x0C● Граффити » \x01Вы выбрали \x03Рандомный граффити");
-			else PrintToChat(client, " \x0C● Граффити » \x01Вы выбрали \x03%s", g_sprays[g_sprayElegido[client]][Nombre]);
-		}
+		g_sprayElegido[client] = itemNum;
+		if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Вы выбрали \x03%s", g_sprays[g_sprayElegido[client]][Nombre]);
 	}
 	else if(action == MenuAction_End) CloseHandle(menu);
 }
 
-stock GetPlayerEyeViewPoint(iClient, Float:fPosition[3], Float:fOrigin[3])
+stock GetPlayerEyeViewPoint(client, Float:fPosition[3], Float:fOrigin[3])
 {
 	decl Float:fAngles[3];
-	GetClientEyeAngles(iClient, fAngles);
+	GetClientEyeAngles(client, fAngles);
 	new Handle:hTrace = TR_TraceRayFilterEx(fOrigin, fAngles, MASK_SHOT, RayType_Infinite, TraceEntityFilterPlayer);
 	if(TR_DidHit(hTrace)) TR_GetEndPosition(fPosition, hTrace);
 	CloseHandle(hTrace);
@@ -334,50 +283,54 @@ TE_SetupBSPDecal(const Float:vecOrigin[3], id)
 	TE_WriteNum("m_nIndex", id);
 }
 
-public Action:OnPlayerRunCmd(iClient, &buttons, &impulse)
+public Action:OnPlayerRunCmd(client, &buttons, &impulse)
 {
-	if(!g_use) return;
+	if(g_use && buttons & IN_USE && buttons & IN_DUCK && IsPlayerAlive(client)) PlaceSpray(client);
+}
 
-	if(buttons & IN_USE)
+stock PlaceSpray(client)
+{
+	new iTime = GetTime(), diff = g_time + g_iLastSprayed[client] - iTime;
+	if(diff > 0)
 	{
-		if(!IsPlayerAlive(iClient)) return;
-
-		new iTime = GetTime();
-		if((iTime - g_iLastSprayed[iClient]) < g_time) return;
-
-		decl Float:fClientEyePosition[3], Float:fClientEyeViewPoint[3], Float:fVector[3];
-		GetClientEyePosition(iClient, fClientEyePosition);
-		GetPlayerEyeViewPoint(iClient, fClientEyeViewPoint, fClientEyePosition);
-		MakeVectorFromPoints(fClientEyeViewPoint, fClientEyePosition, fVector);
-
-		if(GetVectorLength(fVector) > g_distance) return;
-
-		if(!g_sprayElegido[iClient])
-			TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[GetRandomInt(1, g_sprayCount-1)][index]);
-		else
-		{
-			if(g_sprays[g_sprayElegido[iClient]][index] == 0)
-			{
-				if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Ваш граффити \x07не работает\x01, выберите другой.");
-				return;
-			}
-			TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[g_sprayElegido[iClient]][index]);
-
-			// Save spray position and identifier
-			if(g_sprayIndexLast == g_maxMapSprays)
-				g_sprayIndexLast = 0;
-			g_spraysMapPos[g_sprayIndexLast] = fClientEyeViewPoint;
-			g_spraysMapId[g_sprayIndexLast] = g_sprays[g_sprayElegido[iClient]][index];
-			g_sprayIndexLast++;
-			if(g_sprayMapCount != g_maxMapSprays) g_sprayMapCount++;
-		}
-		TE_SendToAll();
-
-		if(g_showMsg) PrintToChat(iClient, " \x0C● Граффити » \x01Вы использовали свой граффити.");
-		EmitAmbientSound(SND, fVector, iClient, _, _, 0.6);
-
-		g_iLastSprayed[iClient] = iTime;
+		if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Вам нужно подождать \x07%i \x01секунд, чтобы снова использовать эту команду!", diff);
+		return;
 	}
+
+	decl Float:fClientEyePosition[3], Float:fClientEyeViewPoint[3], Float:fVector[3];
+	GetClientEyePosition(client, fClientEyePosition);
+	GetPlayerEyeViewPoint(client, fClientEyeViewPoint, fClientEyePosition);
+	MakeVectorFromPoints(fClientEyeViewPoint, fClientEyePosition, fVector);
+
+	if(GetVectorLength(fVector) > g_distance)
+	{
+		if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Вы \x07слишком далеко \x01от стены, чтобы использовать эту команду!");
+		return;
+	}
+
+	if(!g_sprayElegido[client]) TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[GetRandomInt(1, g_sprayCount-1)][index]);
+	else
+	{
+		if(!g_sprays[g_sprayElegido[client]][index])
+		{
+			if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Ваш граффити \x07не работает\x01, выберите другой.");
+			return;
+		}
+		TE_SetupBSPDecal(fClientEyeViewPoint, g_sprays[g_sprayElegido[client]][index]);
+
+		// Save spray position and identifier
+		if(g_sprayIndexLast == g_maxMapSprays) g_sprayIndexLast = 0;
+		g_spraysMapPos[g_sprayIndexLast] = fClientEyeViewPoint;
+		g_spraysMapId[g_sprayIndexLast] = g_sprays[g_sprayElegido[client]][index];
+		g_sprayIndexLast++;
+		if(g_sprayMapCount != g_maxMapSprays) g_sprayMapCount++;
+	}
+	TE_SendToAll();
+
+	if(g_showMsg) PrintToChat(client, " \x0C● Граффити » \x01Вы использовали свой граффити.");
+	EmitSoundToAll(SND, client, _, _, _, 0.6);
+
+	g_iLastSprayed[client] = iTime;
 }
 
 public Action:Event_PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast)
