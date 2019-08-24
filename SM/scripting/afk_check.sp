@@ -5,8 +5,8 @@
 #include <sdktools_functions>
 #include <sdktools_hooks>
 
-static const char	PLUGIN_NAME[]		= "AFK check",
-					PLUGIN_VERSION[]	= "1.0.0";
+static const char	PL_NAME[]	= "AFK check",
+					PL_VER[]	= "1.0.1";
 
 static const int check[] = {10, 20, 30};	// бездействие, сек. (предупреждение, в наблюдатели, кик)
 
@@ -21,10 +21,10 @@ int iTeams,
 
 public Plugin myinfo =
 {
-	name		= PLUGIN_NAME,
+	name		= PL_NAME,
 	author		= "Grey83",
 	description	= "Check the player is AFK or not",
-	version		= PLUGIN_VERSION,
+	version		= PL_VER,
 	url			= "http://steamcommunity.com/groups/grey83ds"
 }
 
@@ -36,7 +36,7 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnPluginStart()
 {
-	CreateConVar("sm_afk_check", PLUGIN_VERSION, PLUGIN_NAME, FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("sm_afk_check", PL_VER, PL_NAME, FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	EngineVersion engine = GetEngineVersion();
 	if(!(bCS = engine == Engine_CSGO || engine == Engine_CSS)) iTeams = GetTeamCount();
@@ -74,7 +74,7 @@ public void Event_End(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 {
-	bNew[event.GetInt("userid")] = false;
+	bNew[GetClientOfUserId(event.GetInt("userid"))] = false;
 }
 
 public void OnClientPostAdminCheck(int client)
@@ -86,7 +86,7 @@ public void OnClientPostAdminCheck(int client)
 	}
 }
 
-public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon, int &subtype, int &cmdnum, int &tickcount, int &seed, int mouse[2])
+public Action OnPlayerRunCmd(int client, int &buttons)
 {
 	if(!bEnabled || bNew[client] || bAdmin[client] || IsFakeClient(client) || IsClientReplay(client) || IsClientSourceTV(client))
 		return Plugin_Continue;
