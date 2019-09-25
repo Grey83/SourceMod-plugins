@@ -83,9 +83,11 @@ public void OnPluginStart()
 
 	cvar = CreateConVar("sm_bzp_color_t", "F007", rus ? "цвет Т в своей зоне, пока защита активна" : "color of T in their zone while protect lasts", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_TColor);
+	CVarChanged_TColor(cvar, NULL_STRING, NULL_STRING);
 
 	cvar = CreateConVar("sm_bzp_color_ct", "00F7", rus ? "цвет КТ в своей зоне, пока защита активна" : "color of CT in their zone while protect lasts", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_CTColor);
+	CVarChanged_CTColor(cvar, NULL_STRING, NULL_STRING);
 
 	cvar = CreateConVar("sm_bzp_notice", "1", rus ? "разрешить(0) или нет(1) плагину сообщать игрокам о входе/покидании зоны" : "allow(0) or not(1) sending messages about entering/leaving zones", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Msg);
