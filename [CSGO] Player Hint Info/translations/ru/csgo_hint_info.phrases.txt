@@ -1,0 +1,28 @@
+"Phrases"
+{
+	"InfoNoHealht"
+	{
+		"ru"	"{1}<br/>{2}"
+	}
+	"InfoHealht"
+	{
+		"ru"	"{1}<br/><b>{2}</b> ХП<br/>{3}"
+	}
+
+	"Enemy"
+	{
+		"ru"	"<font color='#ff4040'>враг</font>"
+	}
+	"Ally"
+	{
+		"ru"	"<font color='#40ff40'>союзник</font>"
+	}
+	"Terrorist"
+	{
+		"ru"	"<font color='#ff4040'>террорист</font>"
+	}
+	"Counter-Terrorist"
+	{
+		"ru"	"<font color='#99ccff'>спецназ</font>"
+	}
+}

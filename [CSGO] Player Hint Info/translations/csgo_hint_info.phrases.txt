@@ -1,0 +1,30 @@
+"Phrases"
+{
+	"InfoNoHealht"
+	{
+		"#format"	"{1:s},{2:t}"
+		"en"	"{1}<br/>{2}"
+	}
+	"InfoHealht"
+	{
+		"#format"	"{1:s},{2:i},{3:t}"
+		"en"	"{1}<br/><b>{2}</b> HP<br/>{3}"
+	}
+
+	"Enemy"
+	{
+		"en"	"<font color='#ff4040'>enemy</font>"
+	}
+	"Ally"
+	{
+		"en"	"<font color='#40ff40'>ally</font>"
+	}
+	"Terrorist"
+	{
+		"en"	"<font color='#ff4040'>terrorist</font>"
+	}
+	"Counter-Terrorist"
+	{
+		"en"	"<font color='#99ccff'>counter-terrorist</font>"
+	}
+}
