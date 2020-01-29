@@ -1,0 +1,24 @@
+"Phrases"
+{
+	"KeyPadCode"
+	{
+		"#format"		"{1:d}"
+		"en"			"The keypad #{1} code is:"
+		"ru"			"Код замка #{1}:"
+	}
+	"NoKeypads"
+	{
+		"en"			"None of the keyboard was not found"
+		"ru"			"Кодовые замки не обнаружены"
+	}
+	"CorrectCode"
+	{
+		"en"			"entered the correct code:"
+		"ru"			"ввёл правильный код:"
+	}
+	"IncorrectCode"
+	{
+		"en"			"entered the wrong code:"
+		"ru"			"ввёл неправильный код:"
+	}
+}
