@@ -1,0 +1,21 @@
+// You can use this tags for set text color: {WHITE}, {DEFAULT}, {RED}, {TEAM}, {GREEN}, {LIME}, {LIGHTGREEN}, {LIGHTRED},
+//	{GRAY}, {LIGHTOLIVE}, {OLIVE}", {BLUEGREY}, {LIGHTBLUE}, {BLUE}, {PURPLE}, {LIGHTRED2}
+"Phrases"
+{
+	"TAG"
+	{
+		"tr"	"{RED}☆ "
+	}
+	"HS2All"
+	{
+		"tr"	"{1} {WHITE}Dürbünsüz {LIGHTGREEN}+ {WHITE}Headshot {LIGHTGREEN}Vurdu."
+	}
+	"Kill2All"
+	{
+		"tr"	"{1} {WHITE}Dürbünsüz {LIGHTGREEN}Vurdu."
+	}
+	"Progress"
+	{
+		"tr"	"{WHITE}Noscope ile vurduğun toplam kişi sayısı: {GREEN}{1}{LIGHTGREEN}/{GREEN}{2}"
+	}
+}

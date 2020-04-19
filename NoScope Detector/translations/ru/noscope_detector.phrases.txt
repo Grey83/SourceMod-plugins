@@ -1,0 +1,21 @@
+// Ты можешь использовать эти теги для раскрашивания текста: {WHITE}, {DEFAULT}, {RED}, {TEAM}, {GREEN}, {LIME},
+//	{LIGHTGREEN}, {LIGHTRED}, {GRAY}, {LIGHTOLIVE}, {OLIVE}", {BLUEGREY}, {LIGHTBLUE}, {BLUE}, {PURPLE}, {LIGHTRED2}
+"Phrases"
+{
+	"TAG"
+	{
+		"ru"	"{RED}☆ {GREEN}"
+	}
+	"HS2All"
+	{
+		"ru"	"{2} {WHITE}сделал {LIGHTGREEN}хэдшот без прицела."
+	}
+	"Kill2All"
+	{
+		"ru"	"{2} {WHITE}убил {LIGHTGREEN}без прицела."
+	}
+	"Progress"
+	{
+		"ru"	"{WHITE}Всего убийств без прицела: {GREEN}{1}{LIGHTGREEN}/{GREEN}{2}"
+	}
+}
