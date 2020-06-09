@@ -51,7 +51,7 @@ public Plugin myinfo =
 {
 	name		= "NoScope Detector",
 	author		= "Ak0 (rewritten by Grey83)",
-	version		= "1.3.0",
+	version		= "1.3.1",
 	url			= "https://forums.alliedmods.net/showthread.php?t=290241"
 }
 
@@ -133,30 +133,24 @@ public void CVarChanged_Hs(ConVar cvar, const char[] oldVal, const char[] newVal
 		sPathHs[0] = 0;
 }
 
-public void OnMapStart()
+stock void AddKillSound()
 {
-	if(sPathKill[0])
+	FormatEx(sSndKill, sizeof(sSndKill), "sound/%s", sPathKill);
+	AddFileToDownloadsTable(sSndKill);
+	if(iEngine == E_CSGO)
 	{
-		FormatEx(sSndKill, sizeof(sSndKill), "sound/%s", sPathKill);
-		AddFileToDownloadsTable(sSndKill);
-		if(iEngine == E_CSGO)
-		{
-			FormatEx(sSndKill, sizeof(sSndKill), "*%s", sPathKill);
-			AddToStringTable(FindStringTable("soundprecache"), sSndKill);
-		}
-		else
-		{
-			FormatEx(sSndKill, sizeof(sSndKill), "%s", sPathKill);
-			PrecacheSound(sSndKill, true);
-		}
+		FormatEx(sSndKill, sizeof(sSndKill), "*%s", sPathKill);
+		AddToStringTable(FindStringTable("soundprecache"), sSndKill);
 	}
-
-	if(!sPathHs[0])
+	else
 	{
-		if(!sPathKill[0]) return;
-		else FormatEx(sPathHs, sizeof(sPathHs), sPathKill);
+		FormatEx(sSndKill, sizeof(sSndKill), "%s", sPathKill);
+		PrecacheSound(sSndKill, true);
 	}
+}
 
+stock void AddHSSound()
+{
 	FormatEx(sSndHs, sizeof(sSndHs), "sound/%s", sPathHs);
 	AddFileToDownloadsTable(sSndHs);
 	if(iEngine == E_CSGO)
@@ -169,6 +163,19 @@ public void OnMapStart()
 		FormatEx(sSndHs, sizeof(sSndHs), "%s", sPathHs);
 		PrecacheSound(sSndHs, true);
 	}
+}
+
+public void OnMapStart()
+{
+	if(sPathKill[0]) AddKillSound();
+
+	if(!sPathHs[0])
+	{
+		if(!sPathKill[0]) return;
+		else FormatEx(sPathHs, sizeof(sPathHs), sPathKill);
+	}
+
+	AddHSSound();
 }
 
 public void OnClientConnected(int client)
