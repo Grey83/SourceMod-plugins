@@ -13,10 +13,10 @@
 
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.0.11",
+	PL_VER[]	= "1.1.0",
 
-	MARK_MDL1[]	= "hud/scoreboard_dead.vmt",	// for CSGO & CSS
-	MARK_MDL2[]	= "sprites/glow.vmt",			// for CSSv34
+	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS
+	MARK_V34[]	= "sprites/glow",		//		-//-		  CSSv34
 	KEY_NAME[][]= {"Ctrl", "E", "Shift"},
 	CLR[][][]	=
 {//		name		CSGO		CSS			CSSv34
@@ -54,6 +54,13 @@ enum
 	E_Old
 };
 
+enum
+{
+	M_T,
+	M_CT,
+	M_Any
+};
+
 bool
 	bEnable,
 	bTip,
@@ -80,16 +87,17 @@ int
 	iHPCost,
 	iHP,
 	iFrag,
-	iColorT,
-	iColorCT,
-	iColorAny;
+	iColor[3];
 char
 	sCvarPath[PLATFORM_MAX_PATH],
-	sSoundPath[PLATFORM_MAX_PATH];
+	sSound[PLATFORM_MAX_PATH],
+	sMark[3][PLATFORM_MAX_PATH];
 
 bool
 	bAllowed = true,
-	bProto;
+	bProto,
+	bProtected[MAXPLAYERS+1],
+	bDefault[3];
 int
 	iEngine,
 	iOffsetGroup,
@@ -100,7 +108,8 @@ int
 	iTeam[MAXPLAYERS+1],
 	iDeathTeam[MAXPLAYERS+1],
 	iTarget[MAXPLAYERS+1],
-	iReviver[MAXPLAYERS+1];
+	iReviver[MAXPLAYERS+1],
+	iRevives[MAXPLAYERS+1][2];
 float
 	fDeathPos[MAXPLAYERS+1][3],
 	fDeathAng[MAXPLAYERS+1][3],
@@ -199,7 +208,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_NoBlockTime);
 	iNoBlockTime = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others (negative - add HP to reviver)", FCVAR_NOTIFY, true, -100.0, true, 100.0);
 	cvar.AddChangeHook(CVarChanged_HPCost);
 	iHPCost = cvar.IntValue;
 
@@ -229,15 +238,35 @@ public void OnPluginStart()
 
 	cvar = CreateConVar("sm_revival_color_t", "ff3f1f", "T death mark color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = red", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_ColorT);
-	SetColor(cvar, iColorT, COLOR[0]);
+	SetColor(cvar, M_T);
 
 	cvar = CreateConVar("sm_revival_color_ct", "1f3fff", "CT death mark color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = blue", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_ColorCT);
-	SetColor(cvar, iColorCT, COLOR[1]);
+	SetColor(cvar, M_CT);
 
 	cvar = CreateConVar("sm_revival_color_any", "00bf00", "Any death team mark color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = green", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_ColorAny);
-	SetColor(cvar, iColorAny, COLOR[2]);
+	SetColor(cvar, M_Any);
+
+	cvar = CreateConVar("sm_revival_best", "5", "Show TOPx revivers at round end (0 - disable)", _, true, _, true, 10.0);
+	cvar.AddChangeHook(CVarChanged_Best);
+	iRevives[0][0] = cvar.IntValue;
+
+	cvar = CreateConVar("sm_revival_worst", "1", "Show AntiTOP revivers at round end (0 - disable)", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Worst);
+	iRevives[0][1] = cvar.IntValue;
+
+	cvar = CreateConVar("sm_revival_mark_t", ".vmt", "Path to the vmt-file in folder 'materials' for the T mark. Wrong or empty path = default mark.", FCVAR_PRINTABLEONLY);
+	cvar.AddChangeHook(CVarChanged_MarkT);
+	PrepareMark(cvar, M_T);
+
+	cvar = CreateConVar("sm_revival_mark_ct", ".vmt", "Path to the vmt-file in folder 'materials' for the CT mark. Wrong or empty path = default mark.", FCVAR_PRINTABLEONLY);
+	cvar.AddChangeHook(CVarChanged_MarkCT);
+	PrepareMark(cvar, M_CT);
+
+	cvar = CreateConVar("sm_revival_mark_any", ".vmt", "Path to the vmt-file in folder 'materials' for the Any mark. Wrong or empty path = default mark.", FCVAR_PRINTABLEONLY);
+	cvar.AddChangeHook(CVarChanged_MarkAny);
+	PrepareMark(cvar, M_Any);
 
 	HookEvent("player_team", Event_Team);
 	HookEvent("player_spawn", Event_Spawn);
@@ -361,6 +390,11 @@ public void CVarChanged_Frag(ConVar cvar, const char[] oldVal, const char[] newV
 public void CVarChanged_Sound(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	cvar.GetString(sCvarPath, sizeof(sCvarPath));
+
+	int len = strlen(sCvarPath) - 4;
+	if(len < 1 || strcmp(sCvarPath[len], ".mp3", false) && strcmp(sCvarPath[len], ".wav", false))
+		sCvarPath[0] = sSound[0] = 0;
+	else AddSound();
 }
 
 public void CVarChanged_HS(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -375,23 +409,23 @@ public void CVarChanged_NoDmgTime(ConVar cvar, const char[] oldVal, const char[]
 
 public void CVarChanged_ColorT(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	SetColor(cvar, iColorT, COLOR[0]);
+	SetColor(cvar, M_T);
 	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == 2) SetMarkColor(i);
 }
 
 public void CVarChanged_ColorCT(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	SetColor(cvar, iColorCT, COLOR[1]);
+	SetColor(cvar, M_CT);
 	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == 3) SetMarkColor(i);
 }
 
 public void CVarChanged_ColorAny(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	SetColor(cvar, iColorAny, COLOR[2]);
+	SetColor(cvar, M_Any);
 	if(bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) > 1) SetMarkColor(i);
 }
 
-stock void SetColor(ConVar cvar, int& color, int def_clr)
+stock void SetColor(ConVar cvar, int type)
 {
 	char clr[8];
 	cvar.GetString(clr, sizeof(clr));
@@ -402,8 +436,8 @@ stock void SetColor(ConVar cvar, int& color, int def_clr)
 	{
 		if(!(clr[i] >= '0' && clr[i] <= '9') && !(clr[i] >= 'A' && clr[i] <= 'F') && !(clr[i] >= 'a' && clr[i] <= 'f'))
 		{	// не HEX-число
-			color = def_clr;
-			LogError("HEX color '%s' isn't valid!\nHUD color is 0x%x (%d %d %d)!\n", clr, color, (color & 0xFF0000) >> 16, (color & 0xFF00) >> 8, color & 0xFF);
+			iColor[type] = COLOR[type];
+			LogError("HEX color '%s' isn't valid!\nHUD color is 0x%x (%d %d %d)!\n", clr, iColor[type], (iColor[type] & 0xFF0000) >> 16, (iColor[type] & 0xFF00) >> 8, iColor[type] & 0xFF);
 			return;
 		}
 		i++;
@@ -418,8 +452,56 @@ stock void SetColor(ConVar cvar, int& color, int def_clr)
 		i = 6;
 	}
 
-	if(i != 6) color = def_clr;	// невалидный цвет
-	else StringToIntEx(clr, color , 16);
+	if(i != 6) iColor[type] = COLOR[type];	// невалидный цвет
+	else StringToIntEx(clr, iColor[type] , 16);
+}
+
+public void CVarChanged_Best(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iRevives[0][0] = cvar.IntValue;
+}
+
+public void CVarChanged_Worst(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iRevives[0][1] = cvar.IntValue;
+}
+
+public void CVarChanged_MarkT(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	PrepareMark(cvar, M_T);
+}
+
+public void CVarChanged_MarkCT(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	PrepareMark(cvar, M_CT);
+}
+
+public void CVarChanged_MarkAny(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	PrepareMark(cvar, M_Any);
+}
+
+stock void PrepareMark(ConVar cvar, const int type)
+{
+	cvar.GetString(sMark[type], sizeof(sMark[]));
+	int len = strlen(sMark[type]) - 4;
+	if((bDefault[type] = len < 1 || strcmp(sMark[type][len], ".vmt", false)))
+	{
+		FormatEx(sMark[type], sizeof(sMark[]), "%s.vmt", iEngine == E_Old ? MARK_V34 : MARK_CSS);
+		return;
+	}
+
+	PrecacheMark(sMark[type]);
+}
+
+stock void PrecacheMark(const char[] path)
+{
+	char buffer[PLATFORM_MAX_PATH];
+	strcopy(buffer, sizeof(buffer), path);
+	ReplaceString(buffer, sizeof(buffer), ".vmt", ".vtf");
+	AddFileToDownloadsTable(buffer);
+	AddFileToDownloadsTable(path);
+	PrecacheModel(path, true);
 }
 
 public void OnMapStart()
@@ -440,19 +522,27 @@ public void OnMapStart()
 	}
 	CloseHandle(gameConfig);
 
-	if(!sCvarPath[0]) return;
-	FormatEx(sSoundPath, sizeof(sSoundPath), "sound/%s", sCvarPath);
-	AddFileToDownloadsTable(sSoundPath);
+	if(!bDefault[M_T])		PrecacheMark(sMark[M_T]);
+	if(!bDefault[M_CT])		PrecacheMark(sMark[M_CT]);
+	if(!bDefault[M_Any])	PrecacheMark(sMark[M_Any]);
+
+	if(sCvarPath[0]) AddSound();
+}
+
+stock void AddSound()
+{
+	FormatEx(sSound, sizeof(sSound), "sound/%s", sCvarPath);
+	AddFileToDownloadsTable(sSound);
 
 	if(iEngine == E_CSGO)
 	{
-		FormatEx(sSoundPath, sizeof(sSoundPath), "*%s", sCvarPath);
-		AddToStringTable(FindStringTable("soundprecache"), sSoundPath);
+		FormatEx(sSound, sizeof(sSound), "*%s", sCvarPath);
+		AddToStringTable(FindStringTable("soundprecache"), sSound);
 		return;
 	}
 
-	FormatEx(sSoundPath, sizeof(sSoundPath), "%s", sCvarPath);
-	PrecacheSound(sSoundPath, true);
+	FormatEx(sSound, sizeof(sSound), "%s", sCvarPath);
+	PrecacheSound(sSound, true);
 }
 
 public void OnClientConnected(int client)
@@ -465,6 +555,7 @@ public void OnClientDisconnect(int client)
 {
 	RemoveMark(client);
 	iTeam[client] = 0;
+	bProtected[client] = false;
 }
 
 public void Event_Team(Event event, const char[] name, bool dontBroadcast)
@@ -487,6 +578,7 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 	|| (iDeathTeam[client] = GetClientTeam(client)) < 2)
 		return;
 
+	bProtected[client] = false;
 	CreateMark(client);
 
 	if(iTime) CreateTimer(iTime+0.0, Timer_DisableReviving, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
@@ -528,13 +620,109 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	bAllowed = true;
 	if(bEnable && bTip) PrintToChatAllClr("%t%t", "ChatTag", "KeyTip", KEY_NAME[iKey]);
+	for(int i = 1; i <= MaxClients; i++)
+	{
+		iRevives[i][0] = iRevives[i][1] = 0;
+		bProtected[i] = false;
+	}
 }
 
 public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 {
 	bAllowed = false;
+	ShowTop();
+	ShowAntiTop();
 	for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i);
 	return Plugin_Continue;
+}
+
+stock void ShowTop()
+{
+	if(!iRevives[0][0]) return;
+
+	static int i, j, num, max, lst, place, prc, clients[MAXPLAYERS+1], list[MAXPLAYERS+1][2];
+	max = lst = place = 0;
+
+	for(i = 1, num = 0; i <= MaxClients; i++) if(IsClientInGame(i) && !IsFakeClient(i) && iRevives[i][0])
+	{
+		clients[num++] = i;
+		if(max < iRevives[i][0])
+		{
+			lst	= i;
+			max = iRevives[i][0];
+		}
+	}
+	if(!num) return;
+
+	for(i = 0; i < num && place < iRevives[0][0];)
+	{
+		place++;
+		if(place > 1) for(j = 0, prc = 0; j < num; j++) if(iRevives[clients[j]][0] < max && iRevives[clients[j]][0] > prc)
+		{
+			lst	= clients[j];
+			prc	= iRevives[clients[j]][0];
+		}
+		list[i][0] = place;	// место
+		list[i][1] = lst;	// id
+		max = iRevives[lst][0];
+		i++;
+
+		for(j = 0; j < num && i < num; j++) if(clients[j] != lst && iRevives[clients[j]][0] == max)
+		{
+			list[i][0] = place;
+			list[i][1] = clients[j];
+			i++;
+		}
+	}
+
+	num = i;
+	PrintToChatAllClr("%t", "ChatBestTitle", iRevives[0][0]);
+	for(i = 0; i < num; i++) PrintToChatAllClr("%t", "ChatBestRow", list[i][0], list[i][1], iRevives[list[i][1]][0], iRevives[list[i][1]][1]);
+}
+
+stock void ShowAntiTop()
+{
+	if(!iRevives[0][1]) return;
+
+	static int i, j, num, min, lst, place, prc, clients[MAXPLAYERS+1], list[MAXPLAYERS+1][2];
+	lst = place = 0;
+	min = 2000000000;
+
+	for(i = 1, num = 0; i <= MaxClients; i++) if(IsClientInGame(i) && !IsFakeClient(i) && !iRevives[i][0])
+	{
+		clients[num++] = i;
+		if(min > iRevives[i][1])
+		{
+			lst	= i;
+			min = iRevives[i][1];
+		}
+	}
+	if(!num) return;
+
+	for(i = 0; i < num && place < 10;)
+	{
+		place++;
+		if(place > 1) for(j = 0, prc = 0; j < num; j++) if(iRevives[clients[j]][1] > min && iRevives[clients[j]][1] < prc)
+		{
+			lst	= clients[j];
+			prc	= iRevives[clients[j]][1];
+		}
+		list[i][0] = place;	// место
+		list[i][1] = lst;	// id
+		min = iRevives[lst][1];
+		i++;
+
+		for(j = 0; j < num && i < num; j++) if(clients[j] != lst && iRevives[clients[j]][1] == min)
+		{
+			list[i][0] = place;
+			list[i][1] = clients[j];
+			i++;
+		}
+	}
+
+	num = i;
+	PrintToChatAllClr("%t", "ChatWorstTitle");
+	for(i = 0; i < num; i++) PrintToChatAllClr("%t", "ChatWorstRow", list[i][0], list[i][1], iRevives[list[i][1]][1]);
 }
 
 stock void SendWarnNotEnough(int client, bool &val)
@@ -552,11 +740,18 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1], pos[3];
 	static char name[MAX_NAME_LENGTH];
 
+	if(bProtected[client] && buttons & IN_ATTACK)
+	{
+		buttons &= ~IN_ATTACK;
+		return Plugin_Changed;
+	}
+
 	if(!bEnable || !bAllowed || IsFakeClient(client) || (iTimes && iTimesRevived[client] >= iTimes))
 		return Plugin_Continue;
 
 	if(!reset[client] && (!IsPlayerAlive(client) || GetClientTeam(client) < 2))
 	{
+		if(!IsPlayerAlive(client)) SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
 		reset[client] = true;
 		fProgress[client] = NULL_PERCENT;
 		SendProgressBar(client, old_target[client]);
@@ -567,6 +762,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	cant = iHPCost && (diff = GetClientHealth(client) - iHPCost) < 1 && !bDeath;
 	if(buttons & KEY_VAL[iKey] && !(old_buttons[client] & KEY_VAL[iKey]) && cant && !old_target[client])
 	{
+		SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
 		SendWarnNotEnough(client, prev[client]);
 		old_buttons[client] = buttons;
 		return Plugin_Continue;
@@ -574,6 +770,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 	if(old_target[client] && (!IsClientInGame(old_target[client]) || IsPlayerAlive(old_target[client]) || cant))
 	{
+		SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
 		fProgress[client][old_target[client]] = 0.0;
 		old_target[client] = 0;
 		SendProgressBar(client);
@@ -644,14 +841,11 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			}
 			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client], diff);
 		}
-		else
+		else if(old_target[client])
 		{
-			if(old_target[client])
-			{
-				SaveProgress(client, old_target[client], FloatSub(time, start[client]));
-				SendProgressBar(client, old_target[client]);
-				old_target[client] = 0;
-			}
+			SaveProgress(client, old_target[client], FloatSub(time, start[client]));
+			SendProgressBar(client, old_target[client]);
+			old_target[client] = 0;
 		}
 	}
 	else if(old_buttons[client] & KEY_VAL[iKey] && old_target[client])
@@ -670,21 +864,27 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	return Plugin_Continue;
 }
 
+stock void SaveStats(int client, int val = 100, bool success = true)
+{
+	if(success) iRevives[client][0]++;
+	iRevives[client][1] += val;
+}
+
 stock void CreateMark(int client)
 {
-//	if(hHalo == -1) return;
 	iTeam[client] = GetClientTeam(client);
 
 	GetClientAbsOrigin(client, fDeathPos[client]);
 	fDeathPos[client][2] -= 40;
 	GetClientAbsAngles(client, fDeathAng[client]);
 
-	static int ent;
+	static int ent, type;
 	if((ent = GetMarkId(client)) != -1) AcceptEntityInput(ent, "Kill");
 
 	if((ent = CreateEntityByName("env_sprite")) == -1) return;
 
-	DispatchKeyValue(ent, "model", iEngine == E_Old ? MARK_MDL2 : MARK_MDL1);
+	type = bEnemy ? M_Any : iTeam[client] == 2 ? M_T : M_CT;
+	DispatchKeyValue(ent, "model", sMark[type]);
 	DispatchKeyValue(ent, "classname", "death_mark");
 	DispatchKeyValue(ent, "spawnflags", "1");
 	DispatchKeyValueFloat(ent, "scale", MARK_SIZE);
@@ -698,14 +898,14 @@ stock void CreateMark(int client)
 
 stock void SetMarkColor(const int client)
 {
-	static int clr;
-	clr = bEnemy ? iColorAny : iTeam[client] == 2 ? iColorT : iColorCT;
+	static int type;
+	type = bEnemy ? M_Any : iTeam[client] == 2 ? M_T : M_CT;
 
-	SetVariantInt(((clr & 0xFF0000) >> 16));
+	SetVariantInt(((iColor[type] & 0xFF0000) >> 16));
 	AcceptEntityInput(iMarkRef[client], "ColorRedValue");
-	SetVariantInt(((clr & 0xFF00) >> 8));
+	SetVariantInt(((iColor[type] & 0xFF00) >> 8));
 	AcceptEntityInput(iMarkRef[client], "ColorGreenValue");
-	SetVariantInt((clr & 0xFF));
+	SetVariantInt((iColor[type] & 0xFF));
 	AcceptEntityInput(iMarkRef[client], "ColorBlueValue");
 }
 
@@ -762,6 +962,7 @@ stock Action InitRespawn(int client, int target, int hp)
 	if(!IsPlayerAlive(client) || !IsClientValid(target, true))	// не факт что необходима
 		return Plugin_Handled;
 
+	SaveStats(client);
 	RemoveMark(client);
 	ResetPercents(client);
 	SendProgressBar(client, target);
@@ -784,7 +985,7 @@ stock Action InitRespawn(int client, int target, int hp)
 		GetClientName(client, name, sizeof(name));
 		PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", target, name);
 	}
-	if(sSoundPath[0]) EmitAmbientSound(sSoundPath, fDeathPos[target]);
+	if(sSound[0]) EmitAmbientSound(sSound, fDeathPos[target]);
 
 	if(iHPCost)
 	{
@@ -800,6 +1001,7 @@ stock Action InitRespawn(int client, int target, int hp)
 
 	if(fNoDmgTime > 0.01)
 	{
+		bProtected[target] = true;
 		SetEntProp(target, Prop_Data, "m_takedamage", 0, 1);
 		SetClientColor(target, RENDERFX_HOLOGRAM, RENDER_TRANSCOLOR, 63, 255, 63 , 63);
 		CreateTimer(fNoDmgTime, Timer_EnableDmg, GetClientUserId(target), TIMER_FLAG_NO_MAPCHANGE);
@@ -820,6 +1022,7 @@ public Action Timer_EnableDmg(Handle timer, any client)
 {
 	if((client = GetClientOfUserId(client)))
 	{
+		bProtected[client] = false;
 		SetEntProp(client, Prop_Data, "m_takedamage", 2, 1);
 		SetClientColor(client);
 	}
@@ -893,11 +1096,11 @@ stock void TE_SetupBeamRingTarget(const int target, int team)
 	TE_WriteFloat("m_fWidth", 3.0);
 	TE_WriteFloat("m_fEndWidth", 3.0);
 	TE_WriteFloat("m_fAmplitude", 0.0);
-	static int clr;
-	clr = bEnemy ? iColorAny : team == 2 ? iColorT : iColorCT;
-	TE_WriteNum("r", ((clr & 0xFF0000) >> 16));
-	TE_WriteNum("g", ((clr & 0xFF00) >> 8));
-	TE_WriteNum("b", (clr & 0xFF));
+	static int type;
+	type = bEnemy ? M_Any : team == 2 ? M_T : M_CT;
+	TE_WriteNum("r", ((iColor[type] & 0xFF0000) >> 16));
+	TE_WriteNum("g", ((iColor[type] & 0xFF00) >> 8));
+	TE_WriteNum("b", (iColor[type] & 0xFF));
 	TE_WriteNum("a", 191);
 	TE_WriteNum("m_nSpeed", 1);
 	TE_WriteNum("m_nFlags", 0);
