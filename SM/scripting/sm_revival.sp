@@ -13,7 +13,7 @@
 
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.0",
+	PL_VER[]	= "1.1.1",
 
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS
 	MARK_V34[]	= "sprites/glow",		//		-//-		  CSSv34
@@ -73,7 +73,8 @@ bool
 	bEffect,
 	bDeath,
 	bSprites,
-	bHS;
+	bHS,
+	bReset;
 float
 	fRadius,
 	fNoDmgTime;
@@ -85,15 +86,18 @@ int
 	iTimes,
 	iNoBlockTime,
 	iHPCost,
+	iHPMax,
 	iHP,
 	iFrag,
-	iColor[3];
+	iColor[3],
+	iBalance;
 char
 	sCvarPath[PLATFORM_MAX_PATH],
 	sSound[PLATFORM_MAX_PATH],
 	sMark[3][PLATFORM_MAX_PATH];
 
 bool
+	bLate,
 	bAllowed = true,
 	bProto,
 	bProtected[MAXPLAYERS+1],
@@ -109,7 +113,8 @@ int
 	iDeathTeam[MAXPLAYERS+1],
 	iTarget[MAXPLAYERS+1],
 	iReviver[MAXPLAYERS+1],
-	iRevives[MAXPLAYERS+1][2];
+	iRevives[MAXPLAYERS+1][2],
+	iDiff;
 float
 	fDeathPos[MAXPLAYERS+1][3],
 	fDeathAng[MAXPLAYERS+1][3],
@@ -124,6 +129,12 @@ public Plugin myinfo =
 	url			= "https://steamcommunity.com/groups/grey83ds"
 //	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/sm_revival.sp
 };
+
+public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
+{
+	bLate = late;
+	return APLRes_Success;
+}
 
 public void OnPluginStart()
 {
@@ -204,6 +215,10 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Times);
 	iTimes = cvar.IntValue;
 
+	cvar = CreateConVar("sm_revival_reset", "0", "Reset counter of revived (for cvar 'sm_revival_times') at every: 0 - round, 1 - spawn", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Reset);
+	bReset = cvar.BoolValue;
+
 	cvar = CreateConVar("sm_revival_noblock_time", "2", "Noblocking time after respawn(set at 0 if you have any noblock plugin)", _, true);
 	cvar.AddChangeHook(CVarChanged_NoBlockTime);
 	iNoBlockTime = cvar.IntValue;
@@ -211,6 +226,10 @@ public void OnPluginStart()
 	cvar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others (negative - add HP to reviver)", FCVAR_NOTIFY, true, -100.0, true, 100.0);
 	cvar.AddChangeHook(CVarChanged_HPCost);
 	iHPCost = cvar.IntValue;
+
+	cvar = CreateConVar("sm_revival_maxhealth", "100", "The maximum amount of health that a reviver can receive for reviving players (0 - disable limit)", FCVAR_NOTIFY, true, _, true, 10000.0);
+	cvar.AddChangeHook(CVarChanged_HPMax);
+	iHPMax = cvar.IntValue;
 
 	cvar = CreateConVar("sm_revival_death", "1", "Can a player revive others if he have less HP than needed for reviving", FCVAR_NOTIFY, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Death);
@@ -227,6 +246,10 @@ public void OnPluginStart()
 	cvar = CreateConVar("sm_revival_hs_rip", "0", "Disallow the revival of the players killed in the head", FCVAR_NOTIFY, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_HS);
 	bHS = cvar.BoolValue;
+
+	cvar = CreateConVar("sm_revival_balance", "1", "The difference in the number of live players of the teams, at which player can revive allies (-1 - disable restriction)", _, true, -1.0, true, 5.0);
+	cvar.AddChangeHook(CVarChanged_Balance);
+	iBalance = cvar.IntValue;
 
 	cvar = CreateConVar("sm_revival_soundpath", "ui/achievement_earned.wav", "This sound playing after reviving (empty string = disabled)", FCVAR_PRINTABLEONLY, true);
 	cvar.AddChangeHook(CVarChanged_Sound);
@@ -276,6 +299,9 @@ public void OnPluginStart()
 	LoadTranslations("revival.phrases");
 
 	AutoExecConfig(true, "revival");
+
+	if(bLate) CountAlive();
+	bLate = false;
 }
 
 public void OnPluginEnd()
@@ -362,6 +388,11 @@ public void CVarChanged_Times(ConVar cvar, const char[] oldVal, const char[] new
 	iTimes = cvar.IntValue;
 }
 
+public void CVarChanged_Reset(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	bReset = cvar.BoolValue;
+}
+
 public void CVarChanged_NoBlockTime(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	iNoBlockTime = cvar.IntValue;
@@ -370,6 +401,11 @@ public void CVarChanged_NoBlockTime(ConVar cvar, const char[] oldVal, const char
 public void CVarChanged_HPCost(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	iHPCost = cvar.IntValue;
+}
+
+public void CVarChanged_HPMax(ConVar cvar, const char[] oldVal, const char[] newVal)
+{
+	iHPMax = cvar.IntValue;
 }
 
 public void CVarChanged_Death(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -402,6 +438,11 @@ public void CVarChanged_HS(ConVar cvar, const char[] oldVal, const char[] newVal
 	bHS = cvar.BoolValue;
 }
 
+public void CVarChanged_Balance(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iBalance = cvar.IntValue;
+}
+
 public void CVarChanged_NoDmgTime(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	fNoDmgTime = cvar.FloatValue;
@@ -410,19 +451,20 @@ public void CVarChanged_NoDmgTime(ConVar cvar, const char[] oldVal, const char[]
 public void CVarChanged_ColorT(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
 	SetColor(cvar, M_T);
-	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == 2) SetMarkColor(i);
+	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == CS_TEAM_T) SetMarkColor(i);
 }
 
 public void CVarChanged_ColorCT(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
 	SetColor(cvar, M_CT);
-	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == 3) SetMarkColor(i);
+	if(!bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) == CS_TEAM_CT) SetMarkColor(i);
 }
 
 public void CVarChanged_ColorAny(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
 	SetColor(cvar, M_Any);
-	if(bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) > 1) SetMarkColor(i);
+	if(bEnemy) for(int i = 1; i <= MaxClients; i++) if(IsMarkExist(i) && GetClientTeam(i) > CS_TEAM_SPECTATOR)
+		SetMarkColor(i);
 }
 
 stock void SetColor(ConVar cvar, int type)
@@ -491,6 +533,8 @@ stock void PrepareMark(ConVar cvar, const int type)
 		return;
 	}
 
+	if(StrContains(sMark[type], "materials/", false)) Format(sMark[type], sizeof(sMark[]), "materials/%s", sMark[type]);
+
 	PrecacheMark(sMark[type]);
 }
 
@@ -553,8 +597,9 @@ public void OnClientConnected(int client)
 
 public void OnClientDisconnect(int client)
 {
+	CountAlive();
 	RemoveMark(client);
-	iTeam[client] = 0;
+	iTeam[client] = CS_TEAM_NONE;
 	bProtected[client] = false;
 }
 
@@ -563,7 +608,7 @@ public void Event_Team(Event event, const char[] name, bool dontBroadcast)
 	static int client;
 	if(!bAllowed || !(client = GetClientOfUserId(event.GetInt("userid")))) return;
 
-	if(((iTeam[client] = event.GetInt("team")) < 2) || (!bTeam && iTeam[client] != iDeathTeam[client]))
+	if(((iTeam[client] = event.GetInt("team")) < CS_TEAM_T) || (!bTeam && iTeam[client] != iDeathTeam[client]))
 	{
 		ResetRespawnData(client);
 		iDeathTeam[client] = 0;
@@ -574,8 +619,11 @@ public void Event_Team(Event event, const char[] name, bool dontBroadcast)
 public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 {
 	static int client;
-	if(!bEnable || !bAllowed || bHS && event.GetBool("headshot") || !(client = GetClientOfUserId(event.GetInt("userid")))
-	|| (iDeathTeam[client] = GetClientTeam(client)) < 2)
+	if(!(client = GetClientOfUserId(event.GetInt("userid"))) || (iDeathTeam[client] = GetClientTeam(client)) < 2)
+		return;
+
+	CountAlive();
+	if(!bEnable || !bAllowed || bHS && event.GetBool("headshot"))
 		return;
 
 	bProtected[client] = false;
@@ -614,10 +662,21 @@ public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 	ResetPercents(client);
 	iDeathTeam[client] = iTarget[client] = iReviver[client] = 0;
 	iTeam[client] = GetClientTeam(client);
+	CountAlive();
+}
+
+stock void CountAlive()
+{
+	static int i;
+	iDiff = 0;
+	for(i = 1; i <= MaxClients; i++)
+		if(IsClientInGame(i) && (iTeam[i] = GetClientTeam(i)) > CS_TEAM_SPECTATOR && IsPlayerAlive(i))
+			iDiff += (iTeam[i] == CS_TEAM_CT) ? 1 : -1;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 {
+	CountAlive();
 	bAllowed = true;
 	if(bEnable && bTip) PrintToChatAllClr("%t%t", "ChatTag", "KeyTip", KEY_NAME[iKey]);
 	for(int i = 1; i <= MaxClients; i++)
@@ -632,7 +691,7 @@ public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 	bAllowed = false;
 	ShowTop();
 	ShowAntiTop();
-	for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i);
+	for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i, true);
 	return Plugin_Continue;
 }
 
@@ -643,7 +702,7 @@ stock void ShowTop()
 	static int i, j, num, max, lst, place, prc, clients[MAXPLAYERS+1], list[MAXPLAYERS+1][2];
 	max = lst = place = 0;
 
-	for(i = 1, num = 0; i <= MaxClients; i++) if(IsClientInGame(i) && !IsFakeClient(i) && iRevives[i][0])
+	for(i = 1, num = 0; i <= MaxClients; i++) if(IsPlayerValid(i) && iRevives[i][0])
 	{
 		clients[num++] = i;
 		if(max < iRevives[i][0])
@@ -688,15 +747,16 @@ stock void ShowAntiTop()
 	lst = place = 0;
 	min = 2000000000;
 
-	for(i = 1, num = 0; i <= MaxClients; i++) if(IsClientInGame(i) && !IsFakeClient(i) && !iRevives[i][0])
-	{
-		clients[num++] = i;
-		if(min > iRevives[i][1])
+	for(i = 1, num = 0; i <= MaxClients; i++)
+		if(IsPlayerValid(i) && GetClientTeam(i) > CS_TEAM_SPECTATOR && !iRevives[i][0])
 		{
-			lst	= i;
-			min = iRevives[i][1];
+			clients[num++] = i;
+			if(min > iRevives[i][1])
+			{
+				lst	= i;
+				min = iRevives[i][1];
+			}
 		}
-	}
 	if(!num) return;
 
 	for(i = 0; i < num && place < 10;)
@@ -735,21 +795,49 @@ stock void SendWarnNotEnough(int client, bool &val)
 
 public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon)
 {
-	static bool reset[MAXPLAYERS+1], cant, prev[MAXPLAYERS+1];
-	static int old_target[MAXPLAYERS+1], diff, target[MAXPLAYERS+1], old_buttons[MAXPLAYERS+1], iOffsetVel_0 = -1, iOffsetVel_1 = -1, iOffsetVel_2 = -1;
+	static bool reset[MAXPLAYERS+1], cant, prev[MAXPLAYERS+1], warned[MAXPLAYERS+1];
+	static int old_target[MAXPLAYERS+1], diff, target[MAXPLAYERS+1], old_buttons[MAXPLAYERS+1], iOffsetVel_0 = -1, iOffsetVel_1 = -1, iOffsetVel_2 = -1, health;
 	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1], pos[3];
 	static char name[MAX_NAME_LENGTH];
 
-	if(bProtected[client] && buttons & IN_ATTACK)
+	if(bProtected[client])
 	{
-		buttons &= ~IN_ATTACK;
-		return Plugin_Changed;
+		cant = false;
+		if(buttons & IN_ATTACK)
+		{
+			buttons &= ~IN_ATTACK;
+			cant = true;
+		}
+		if(buttons & IN_ATTACK2)
+		{
+			buttons &= ~IN_ATTACK2;
+			cant = true;
+		}
+		if(cant) return Plugin_Changed;
 	}
 
-	if(!bEnable || !bAllowed || IsFakeClient(client) || (iTimes && iTimesRevived[client] >= iTimes))
+	if(!bEnable || !bAllowed || !IsPlayerValid(client) || (iTimes && iTimesRevived[client] >= iTimes))
 		return Plugin_Continue;
 
-	if(!reset[client] && (!IsPlayerAlive(client) || GetClientTeam(client) < 2))
+	if(iBalance != -1 && iTeam[client] > CS_TEAM_SPECTATOR && buttons & KEY_VAL[iKey]
+	&& ((iTeam[client] == CS_TEAM_CT ? iDiff : -iDiff) >= iBalance))
+	{
+		if(old_target[client])
+		{
+			SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
+			SendProgressBar(client, old_target[client]);
+			old_target[client] = 0;
+		}
+		if(!warned[client])
+		{
+			PrintToChatClr(client, "%t%t", "ChatTag", "ChatUnbalanced");
+			warned[client] = true;
+		}
+		old_buttons[client] = buttons;
+		return Plugin_Continue;
+	}
+
+	if(!reset[client] && (!IsPlayerAlive(client) || GetClientTeam(client) < CS_TEAM_T))
 	{
 		if(!IsPlayerAlive(client)) SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
 		reset[client] = true;
@@ -759,7 +847,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		return Plugin_Continue;
 	}
 
-	cant = iHPCost && (diff = GetClientHealth(client) - iHPCost) < 1 && !bDeath;
+	cant = iHPCost && (diff = (health = GetClientHealth(client)) - iHPCost) < 1 && !bDeath;
 	if(buttons & KEY_VAL[iKey] && !(old_buttons[client] & KEY_VAL[iKey]) && cant && !old_target[client])
 	{
 		SaveStats(client, RoundToNearest(fProgress[client][old_target[client]]), false);
@@ -785,6 +873,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	time = GetGameTime();
 	if(buttons & KEY_VAL[iKey] && GetEntityFlags(client) & FL_ONGROUND)
 	{
+		warned[client] = false;
 		if(!old_target[client] || !iDeathTeam[old_target[client]])
 			target[client] = GetNearestTarget(client);
 		else if((iOffsetVel_0 != -1 || (iOffsetVel_0 = FindSendPropInfo("CCSPlayer", "m_vecVelocity[0]")) != -1)
@@ -808,6 +897,15 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 
 		if(target[client] && IsClientConnected(target[client]))
 		{
+			if(iHPCost)
+			{
+				if(iHPCost < 0 && iHPMax)
+				{
+					if(health > iHPMax) diff = health;
+					else if(diff > iHPMax) diff = iHPMax;
+				}
+			}
+
 			reset[client] = false;
 			if(target[client] != old_target[client])
 			{
@@ -833,12 +931,13 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					if(iHPCost)
 					{
 						if(diff < 1) PrintToChatClr(client, "%t", "ReviveCostDeath");
-						else PrintToChatClr(client, "%t", "ReviveCostHealth", diff);
+						else if(health != diff) PrintToChatClr(client, "%t", "ReviveCostHealth", diff);
 					}
 				}
 				iReviver[target[client]] = client;
 				iTarget[client] = target[client];
 			}
+
 			if(FloatSub(time, start[client])/iCD >= 1) InitRespawn(client, target[client], diff);
 		}
 		else if(old_target[client])
@@ -883,7 +982,7 @@ stock void CreateMark(int client)
 
 	if((ent = CreateEntityByName("env_sprite")) == -1) return;
 
-	type = bEnemy ? M_Any : iTeam[client] == 2 ? M_T : M_CT;
+	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
 	DispatchKeyValue(ent, "model", sMark[type]);
 	DispatchKeyValue(ent, "classname", "death_mark");
 	DispatchKeyValue(ent, "spawnflags", "1");
@@ -899,7 +998,7 @@ stock void CreateMark(int client)
 stock void SetMarkColor(const int client)
 {
 	static int type;
-	type = bEnemy ? M_Any : iTeam[client] == 2 ? M_T : M_CT;
+	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
 
 	SetVariantInt(((iColor[type] & 0xFF0000) >> 16));
 	AcceptEntityInput(iMarkRef[client], "ColorRedValue");
@@ -909,11 +1008,12 @@ stock void SetMarkColor(const int client)
 	AcceptEntityInput(iMarkRef[client], "ColorBlueValue");
 }
 
-stock void ResetRespawnData(int client)
+stock void ResetRespawnData(int client, bool round = false)
 {
 	SendProgressBar(client);
 	fProgress[client] = NULL_PERCENT;
-	iTimesRevived[client] = iDeathTeam[client] = iTarget[client] = iReviver[client] = 0;
+	iDeathTeam[client] = iTarget[client] = iReviver[client] = 0;
+	if(bReset || round) iTimesRevived[client] = 0;
 	RemoveMark(client);
 }
 
@@ -1154,6 +1254,11 @@ stock void PrintToChatClr(int client, const char[] msg, any ...)
 stock bool IsClientValid(int client, bool allow_bots = false)
 {
 	return client > 0 && client <= MaxClients && IsClientInGame(client) && (allow_bots || !IsFakeClient(client));
+}
+
+stock bool IsPlayerValid(int client)
+{
+	return IsClientInGame(client) && !IsFakeClient(client);
 }
 
 stock bool IsMarkExist(int client)
