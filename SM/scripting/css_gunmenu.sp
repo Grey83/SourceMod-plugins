@@ -89,7 +89,6 @@ bool
 	bLate,
 	bGive[W_Total][MAXPLAYERS+1] = {{true, ...}, {true, ...}, {true, ...}};
 int
-	m_bHasDefuser,
 	iAllowed[W_Total],
 	iArmor,
 	iNadesMax[3],
@@ -442,15 +441,15 @@ public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 
 public void RequestFrame_Callback(int client)
 {
-	static int team, armor, helmet;
+	static int team, armor, helmet, defuser;
 	if(!(client = GetClientOfUserId(client)) || (team = GetClientTeam(client)) < 2) return;
 
 	if(iArmor && (armor > 0 || (armor = FindSendPropInfo("CCSPlayer", "m_ArmorValue")) > 0))
 		SetEntData(client, armor, 100, 1, true);
 	if(iArmor == 2 && (helmet > 0 || (helmet = FindSendPropInfo("CCSPlayer", "m_bHasHelmet")) > 0))
 		SetEntData(client, helmet, 1, 1, true);
-	if(team == 3 && (m_bHasDefuser > 0 || (m_bHasDefuser = FindSendPropInfo("CCSPlayer", "m_bHasDefuser")) > 0))
-		SetEntData(client, m_bHasDefuser, 1, 1, true);
+	if(team == 3 && (defuser > 0 || (defuser = FindSendPropInfo("CCSPlayer", "m_bHasDefuser")) > 0))
+		SetEntData(client, defuser, 1, 1, true);
 
 	RemoveWeaponBySlot(client, Slot_Primary);
 	if(!GivePlayerWeapon(client, W_Prim)) return;
