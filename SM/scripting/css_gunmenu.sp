@@ -9,9 +9,16 @@
 	#include <sdktools_variant_t>
 #endif
 
+#if SOURCEMOD_V_MINOR > 10
+	#define PL_NAME	"[CSS] Gun Menu"
+	#define PL_VER	"1.1.2"
+#endif
+
 static const char
+#if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "[CSS] Gun Menu",
-	PL_VER[]	= "1.1.1",
+	PL_VER[]	= "1.1.2",
+#endif
 
 	WEAPON[][][][] =
 {
@@ -48,7 +55,7 @@ static const char
 	},
 	{	// Grenades
 		{"",					"Random\n "},
-		{"weapon_hegrenade",	"M26 HE grenade "},		// 1
+		{"weapon_hegrenade",	"M26 HE grenade"},		// 1
 		{"weapon_flashbang",	"M84 Stun grenade"},	// 2
 		{"weapon_smokegrenade",	"M18 Smoke grenade"},	// 4
 		{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},{"",""},
@@ -82,6 +89,7 @@ bool
 	bLate,
 	bGive[W_Total][MAXPLAYERS+1] = {{true, ...}, {true, ...}, {true, ...}};
 int
+	m_bHasDefuser,
 	iAllowed[W_Total],
 	iArmor,
 	iNadesMax[3],
@@ -168,6 +176,7 @@ public void OnPluginStart()
 
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 	HookEvent("player_spawn",Event_Spawn);
+	HookEvent("player_death",Event_Death, EventHookMode_PostNoCopy);
 
 	ToggleBuyZones();
 
@@ -433,15 +442,15 @@ public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 
 public void RequestFrame_Callback(int client)
 {
-	static int team, defuser, armor, helmet;
+	static int team, armor, helmet;
 	if(!(client = GetClientOfUserId(client)) || (team = GetClientTeam(client)) < 2) return;
 
 	if(iArmor && (armor > 0 || (armor = FindSendPropInfo("CCSPlayer", "m_ArmorValue")) > 0))
 		SetEntData(client, armor, 100, 1, true);
 	if(iArmor == 2 && (helmet > 0 || (helmet = FindSendPropInfo("CCSPlayer", "m_bHasHelmet")) > 0))
 		SetEntData(client, helmet, 1, 1, true);
-	if((defuser > 0 || (defuser = FindSendPropInfo("CCSPlayer", "m_bHasDefuser")) > 0) && team == 3)
-		SetEntData(client, defuser, 1, 1, true);
+	if(team == 3 && (m_bHasDefuser > 0 || (m_bHasDefuser = FindSendPropInfo("CCSPlayer", "m_bHasDefuser")) > 0))
+		SetEntData(client, m_bHasDefuser, 1, 1, true);
 
 	RemoveWeaponBySlot(client, Slot_Primary);
 	if(!GivePlayerWeapon(client, W_Prim)) return;
@@ -450,6 +459,12 @@ public void RequestFrame_Callback(int client)
 	if(!GivePlayerWeapon(client, W_Sec)) return;
 
 	if(iAllowed[W_Nade]) GivePlayerWeapon(client, W_Nade);
+}
+
+public void Event_Death(Event event, const char[] name, bool dontBroadcast)
+{
+	int entity = -1;
+	while((entity = FindEntityByClassname(entity, "item_defuser")) != -1) AcceptEntityInput(entity, "Kill");
 }
 
 stock bool GivePlayerWeapon(int client, int type)
