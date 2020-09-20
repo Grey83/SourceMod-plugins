@@ -314,7 +314,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Frag);
 	iFrag = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_rip", "0", "Disallow the revival of the players killed: 1 - in the head, 2 - with a knife. ", FCVAR_NOTIFY, true, _, true, 3.0);
+	cvar = CreateConVar("sm_revival_rip", "0", "Disallow the revival of the players killed: 1 - in the head, 2 - with a knife.", FCVAR_NOTIFY, true, _, true, 3.0);
 	cvar.AddChangeHook(CVarChanged_RIP);
 	iRIP = cvar.IntValue;
 
@@ -383,6 +383,8 @@ public void OnPluginStart()
 		cvar = CreateConVar("sm_revival_hud_mode", "2", "Show additional info in the: 0 - chat only, 1 - HUD, 2 - KeyHint (not for CS:S v34)", _, true, _, true, 2.0);
 		cvar.AddChangeHook(CVarChanged_HUDMode);
 		iHUD[0] = cvar.IntValue;
+
+		HookUserMessage(GetUserMessageId("KeyHintText"), HookKeyHintText, true);
 	}
 
 	hCookies = RegClientCookie("revive", "Revive clients settings", CookieAccess_Private);
@@ -392,8 +394,6 @@ public void OnPluginStart()
 	HookEvent("player_spawn", Event_Spawn);
 	HookEvent("player_death", Event_Death);
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
-
-	HookUserMessage(GetUserMessageId("KeyHintText"), HookKeyHintText, true);
 
 	LoadTranslations("revival.phrases");
 
