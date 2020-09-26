@@ -15,14 +15,14 @@
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.2"
+	#define PL_VER	"1.1.3"
 #endif
 
 
 static const char
 #if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.2",
+	PL_VER[]	= "1.1.3",
 #endif
 
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS OB
@@ -54,7 +54,8 @@ static const int
 static const float
 	NULL_PERCENT[MAXPLAYERS+1]	= {0.0, ...},
 	EFF_LIFE	= 1.0,	// частота обновления эффекта
-	MARK_SIZE	= 0.3;	// размер меток
+	MARK_SIZE	= 0.3,	// размер меток
+	UPDATE		= 5.0;	// минимальная частота обновления информации HUD и KeyHint - раз в 5 секунд
 
 enum
 {
@@ -93,7 +94,7 @@ bool
 	bPos,
 	bTeam,
 	bEnemy,
-	bBar,
+	bBar[MAXPLAYERS+1],
 	bPercent,
 	bEffect,
 	bDeath,
@@ -102,7 +103,6 @@ bool
 float
 	fRadius,
 	fNoDmgTime,
-	fUpdate,
 	fPosX,
 	fPosY;
 int
@@ -260,7 +260,7 @@ public void OnPluginStart()
 
 	cvar = CreateConVar("sm_revival_bar", "1", "Enable/disable progressbar for reviving", FCVAR_NOTIFY, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Bar);
-	bBar = cvar.BoolValue;
+	bBar[0] = cvar.BoolValue;
 
 	cvar = CreateConVar("sm_revival_percent", "1", "Enable/disable save the percentage of reviving", FCVAR_NOTIFY, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Percent);
@@ -278,7 +278,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Time);
 	iTime = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_countdown", "3.0", "Time for respawn in seconds", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_countdown", "3", "Time for respawn in seconds", FCVAR_NOTIFY, true);
 	cvar.AddChangeHook(CVarChanged_CD);
 	iCD = cvar.IntValue;
 
@@ -342,11 +342,11 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_ColorAny);
 	SetColor(cvar, M_Any);
 
-	cvar = CreateConVar("sm_revival_best", "5", "Show TOPx revivers at round end (0 - disable)", _, true, _, true, 10.0);
+	cvar = CreateConVar("sm_revival_best", "3", "Show TOPx revivers at round end (0 - disable)", _, true, _, true, 10.0);
 	cvar.AddChangeHook(CVarChanged_Best);
 	iRevives[0][0] = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_worst", "1", "Show AntiTOP revivers at round end (0 - disable)", _, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_worst", "3", "Show AntiTOP revivers at round end (0 - disable)", _, true, _, true, 10.0);
 	cvar.AddChangeHook(CVarChanged_Worst);
 	iRevives[0][1] = cvar.IntValue;
 
@@ -364,10 +364,6 @@ public void OnPluginStart()
 
 	if(iEngine != E_Old)
 	{
-		cvar = CreateConVar("sm_revival_hud_update", "5.0", "Update HUD info every x seconds (0.0 - disable info)", _, true, _, true, 5.0);
-		cvar.AddChangeHook(CVarChanged_HUDUpdate);
-		CVarChanged_HUDUpdate(cvar, NULL_STRING, NULL_STRING);
-
 		cvar = CreateConVar("sm_revival_hud_x", "0.99", "HUD info position X (0.0 - 1.0 left to right or -1 for center)", _, true, -2.0, true, 1.0);
 		cvar.AddChangeHook(CVarChanged_HUDPosX);
 		fPosX = cvar.FloatValue;
@@ -383,9 +379,9 @@ public void OnPluginStart()
 		cvar = CreateConVar("sm_revival_hud_mode", "2", "Show additional info in the: 0 - chat only, 1 - HUD, 2 - KeyHint (not for CS:S v34)", _, true, _, true, 2.0);
 		cvar.AddChangeHook(CVarChanged_HUDMode);
 		iHUD[0] = cvar.IntValue;
-
-		HookUserMessage(GetUserMessageId("KeyHintText"), HookKeyHintText, true);
 	}
+
+	if(iEngine == E_CSS) HookUserMessage(GetUserMessageId("KeyHintText"), HookKeyHintText, true);
 
 	hCookies = RegClientCookie("revive", "Revive clients settings", CookieAccess_Private);
 	SetCookieMenuItem(Cookie_Revive, 0, PL_NAME);
@@ -467,7 +463,7 @@ public void CVarChanged_Enemy(ConVar cvar, const char[] oldVal, const char[] new
 
 public void CVarChanged_Bar(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
-	bBar = cvar.BoolValue;
+	bBar[0] = cvar.BoolValue;
 }
 
 public void CVarChanged_Percent(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -660,16 +656,10 @@ stock void PrecacheMark(const char[] path)
 	PrecacheModel(path, true);
 }
 
-public void CVarChanged_HUDUpdate(ConVar cvar, const char[] oldValue, const char[] newValue)
-{
-	fUpdate = cvar.FloatValue;
-	UpdateTimer();
-}
-
 stock void UpdateTimer()
 {
 	if(hTimer) delete hTimer;
-	if(fUpdate > 0) hTimer = CreateTimer(fUpdate, Timer_UpdateHUD, _, TIMER_REPEAT);
+	if(bEnable) hTimer = CreateTimer(UPDATE, Timer_UpdateHUD, _, TIMER_REPEAT);
 }
 
 public void CVarChanged_HUDPosX(ConVar cvar, const char[] oldValue, const char[] newValue)
@@ -716,7 +706,7 @@ public void OnMapStart()
 
 	if(sCvarPath[0]) AddSound();
 
-	if(bEnable) hTimer = CreateTimer(fUpdate, Timer_UpdateHUD, _, TIMER_REPEAT);
+	if(bEnable) hTimer = CreateTimer(UPDATE, Timer_UpdateHUD, _, TIMER_REPEAT);
 }
 
 stock void AddSound()
@@ -738,14 +728,14 @@ stock void AddSound()
 public Action Timer_UpdateHUD(Handle timer)
 {
 	if(iEngine != E_Old)
-		SetHudTextParams(fPosX, fPosY, fUpdate + 0.1, ((iColor[M_HUD] & 0xFF0000) >> 16), ((iColor[M_HUD] & 0xFF00) >> 8), (iColor[M_HUD] & 0xFF), 255, 0, 0.0, 0.1, 0.1);
+		SetHudTextParams(fPosX, fPosY, UPDATE + 0.1, ((iColor[M_HUD] & 0xFF0000) >> 16), ((iColor[M_HUD] & 0xFF00) >> 8), (iColor[M_HUD] & 0xFF), 255, 0, 0.0, 0.1, 0.1);
 
-	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i)) UpdateHUD(i);
+	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i)) UpdateHUD(i, false);
 
 	return Plugin_Continue;
 }
 
-static void UpdateHUD(const int client)
+static void UpdateHUD(const int client, const bool set = true)
 {
 	if(iEngine == E_Old || !iHUD[client]) return;
 
@@ -753,7 +743,8 @@ static void UpdateHUD(const int client)
 	if(!IsClientObserver(client))
 		target = client;
 	else if(((om = GetEntProp(client, Prop_Send, "m_iObserverMode")) != S_1ST && om != S_3RD)
-	|| (target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget")) < 1 || !IsPlayerValid(target))
+	|| (target = GetEntPropEnt(client, Prop_Send, "m_hObserverTarget")) < 1 || target > MaxClients
+	|| !IsPlayerValid(target))
 		return;
 
 	SetGlobalTransTarget(client);
@@ -773,15 +764,10 @@ static void UpdateHUD(const int client)
 
 	if(txt[0] && client != target) Format(txt, sizeof(txt), "%N\n%s", target, txt);
 
-	if(iHUD[client] == 2 && sKeyHintText[client][0]) Format(txt, sizeof(txt), "%s\n\n%s", txt, sKeyHintText[client]);
-
-	SendInfo(client, txt);
-}
-
-stock void SendInfo(const int client, const char[] txt = "")
-{
-	if(iEngine != E_Old && iHUD[client] == 2)
+	if(iHUD[client] == 2)
 	{
+		if(sKeyHintText[client][0]) Format(txt, sizeof(txt), "%s\n\n%s", txt, sKeyHintText[client]);
+
 		Handle msg = StartMessageOne("KeyHintText", client, USERMSG_BLOCKHOOKS);
 		if(!bProto)
 		{
@@ -791,7 +777,11 @@ stock void SendInfo(const int client, const char[] txt = "")
 		else PbAddString(msg, "hints", txt);
 		EndMessage();
 	}
-	else ShowSyncHudText(client, hHUD, txt);
+	else
+	{
+		if(set) SetHudTextParams(fPosX, fPosY, UPDATE + 0.1, ((iColor[M_HUD] & 0xFF0000) >> 16), ((iColor[M_HUD] & 0xFF00) >> 8), (iColor[M_HUD] & 0xFF), 255, 0, 0.0, 0.1, 0.1);
+		ShowSyncHudText(client, hHUD, txt);
+	}
 }
 
 public Action HookKeyHintText(UserMsg msg_id, Handle msg, const int[] players, int playersNum, bool reliable, bool init)
@@ -803,11 +793,11 @@ public Action HookKeyHintText(UserMsg msg_id, Handle msg, const int[] players, i
 		BfReadByte(msg);
 		BfReadString(msg, sKeyHintText[players[0]], sizeof(sKeyHintText[]));
 	}
-	else PbReadString(msg, "hints", sKeyHintText[players[0]], sizeof(sKeyHintText[]));
+//	else PbReadString(msg, "hints", sKeyHintText[players[0]], sizeof(sKeyHintText[]));
 	RequestFrame(RequestFrame_Callback, players[0]);
 
 	if(hTimerClear[players[0]]) delete hTimerClear[players[0]];
-	if(sKeyHintText[players[0]][0]) hTimerClear[players[0]] = CreateTimer(6.0, Timer_ClearBuffer, GetClientUserId(players[0]), TIMER_FLAG_NO_MAPCHANGE);
+	if(sKeyHintText[players[0]][0]) hTimerClear[players[0]] = CreateTimer(UPDATE, Timer_ClearBuffer, GetClientUserId(players[0]), TIMER_FLAG_NO_MAPCHANGE);
 
 	return Plugin_Handled;
 }
@@ -864,8 +854,10 @@ stock void SendMenu(int client)
 		hMenu.AddItem("", "none  (auto revive)\n \n  Show info in the:");
 		hMenu.AddItem("", "show only chat messages)");
 		hMenu.AddItem("", "HUD");
-		hMenu.AddItem("", "KeyHint");
-		hMenu.ExitBackButton = true;
+		hMenu.AddItem("", "KeyHint\n ");
+		hMenu.AddItem("", "Progressbar");
+		hMenu.Pagination = 0;
+		hMenu.ExitButton = true;
 	}
 	hMenu.Display(client, MENU_TIME_FOREVER);
 }
@@ -888,7 +880,8 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 				case 3: FormatEx(buffer, sizeof(buffer), "%t %s\n \n  %t:", "MenuKeyNone", iKey[client] == 3 ? "☑" : "", "MenuInfoHint");
 				case 4: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuInfoNone", iHUD[client] == 0 ? "☑" : "");
 				case 5: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuInfoHUD", iHUD[client] == 1 ? "☑" : "");
-				case 6: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuInfoKeyHint", iHUD[client] == 2 ? "☑" : "");
+				case 6: FormatEx(buffer, sizeof(buffer), "%t %s\n ", "MenuInfoKeyHint", iHUD[client] == 2 ? "☑" : "");
+				case 7: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuProgressbar", bBar[client] ? "☑" : "☐");
 			}
 			return RedrawMenuItem(buffer);
 		}
@@ -897,7 +890,11 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 		case MenuAction_Select:
 		{
 			int val;
-			if(param < 4)
+			if(param == 7)
+			{
+				bBar[client] = !bBar[client];
+			}
+			else if(param < 4)
 			{
 				iKey[client] = param;
 			}
@@ -905,13 +902,13 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 			{
 				iHUD[client] = param - 4;
 			}
-			val = iKey[client] | (iHUD[client] << 7);
+			val = iKey[client] | view_as<int>(bBar[client]) << 3 | (iHUD[client] << 7);
 			FormatEx(buffer, sizeof(buffer), "0x%04x", val);
 			SetClientCookie(client, hCookies, buffer);
 
 			SendMenu(client);
 		}
-		case MenuAction_Cancel: if(param == MenuCancel_ExitBack) ShowCookieMenu(client);
+		case MenuAction_Cancel: if(param == MenuCancel_Exit) ShowCookieMenu(client);
 	}
 	return 0;
 }
@@ -929,8 +926,10 @@ stock void GetCookieValue(int client)
 
 	int val = StringToInt(buffer, 0x10);
 
-	iKey[client] = val & 0x7f;
+	iKey[client] = val & 7;	// 0000 0111
 	if(iKey[client] > 3) iKey[client] = iKey[0];
+
+	bBar[client] = !!(val & 8);	// 0000 1000
 
 	iHUD[client] = val >> 7;
 	if(iHUD[client] > 2) iHUD[client] = iHUD[0];
@@ -1122,7 +1121,7 @@ stock void ShowAntiTop()
 		}
 	if(!num) return;
 
-	for(i = 0; i < num && place < 10;)
+	for(i = 0; i < num && place < iRevives[0][1];)
 	{
 		place++;
 		if(place > 1) for(j = 0, prc = 0; j < num; j++) if(iRevives[clients[j]][1] > min && iRevives[clients[j]][1] < prc)
@@ -1477,9 +1476,9 @@ stock void SaveProgress(const int client, const int target, const float start, c
 {
 	if(!target) return;
 #if SOURCEMOD_V_MINOR < 10
-	if(!bPercent) fProgress[client][target] = FloatSub(stop, start);
+	if(bPercent) fProgress[client][target] = FloatSub(stop, start);
 #else
-	if(!bPercent) fProgress[client][target] = stop - start;
+	if(bPercent) fProgress[client][target] = stop - start;
 #endif
 	else fProgress[client][target] = 0.0;
 }
@@ -1578,23 +1577,36 @@ public Action Timer_EnableCollision(Handle timer, any client)
 
 stock void SendProgressBar(const int client, const int target = 0, const float time = 0.0)
 {
-	if(iEngine == E_CSGO || !bBar || !IsClientValid(client)) return;
+	if(!bBar[client] && !target && !bBar[target]) return;
 
-	static int iOffsetStart = -1, iOffsetDuration = -1;
-	if(iOffsetStart == -1 && (iOffsetStart = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) == -1)
+	static int left;
+	left = time ? iCD : 0;
+	SetProgressBar(client, time, left);
+	SetProgressBar(target, time, left);
+}
+
+static void SetProgressBar(const int client, const float time, const int left)
+{
+	if(!IsClientValid(client) || !bBar[client]) return;
+
+	static int start, duration;
+	if(start < 1 && (start = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) < 1
+	|| duration < 1 && (duration = FindSendPropInfo("CCSPlayer", "m_iProgressBarDuration")) < 1)
 		return;
-	if(iOffsetDuration == -1 && (iOffsetDuration = FindSendPropInfo("CCSPlayer", "m_iProgressBarDuration")) == -1)
+
+	SetEntDataFloat(client, start, time, true);
+	SetEntData(client, duration, left, true);
+
+	if(iEngine != E_CSGO || !left) return;
+
+	static int simulation, blocking;
+	if(simulation < 1 && (simulation = FindSendPropInfo("CBaseEntity", "m_flSimulationTime")) < 1)
+		return;
+	if(blocking < 1 && (blocking = FindSendPropInfo("CCSPlayer", "m_iBlockingUseActionInProgress")) < 1)
 		return;
 
-	static int duration;
-	duration = time ? iCD : 0;
-
-	SetEntDataFloat(client, iOffsetStart, time, true);
-	SetEntData(client, iOffsetDuration, duration, true);
-
-	if(!IsClientValid(target)) return;
-	SetEntDataFloat(target, iOffsetStart, time, true);
-	SetEntData(target, iOffsetDuration, duration, true);
+	SetEntDataFloat(client, simulation, view_as<float>(left), true);
+	SetEntData(client, blocking, 0, 4, true);
 }
 
 stock void CreateEffect(const int client, const int target)
