@@ -15,14 +15,14 @@
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.3"
+	#define PL_VER	"1.1.3_fix"
 #endif
 
 
 static const char
 #if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.3",
+	PL_VER[]	= "1.1.3_fix",
 #endif
 
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS OB
@@ -404,6 +404,7 @@ public void OnPluginStart()
 		if(!AreClientCookiesCached(i))
 		{
 			iKey[i] = iKey[0];
+			bBar[i] = bBar[0];
 			iHUD[i] = iHUD[0];
 		}
 		else GetCookieValue(i);
@@ -822,6 +823,7 @@ public void OnClientConnected(int client)
 		if(!AreClientCookiesCached(client))
 		{
 			iKey[client] = iKey[0];
+			bBar[client] = bBar[0];
 			iHUD[client] = iHUD[0];
 		}
 		else GetCookieValue(client);
