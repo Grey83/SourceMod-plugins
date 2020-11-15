@@ -1,144 +1,124 @@
-#include <sourcemod>
+#pragma semicolon 1
+#pragma newdecls required
+
 #include <sdktools>
 
-static const String:PARACHUTE_VERSION[] = "2.5.1_reduced";
+#if SOURCEMOD_V_MINOR > 10
+	#define PL_NAME	"SM Parachute"
+	#define PL_VER	"2.5.2_reduced"
+#else
+static const char
+	PL_NAME[]	= "SM Parachute",
+	PL_VER[]	= "2.5.2_reduced";
+#endif
 
-new g_iVelocity = -1,
-	g_maxplayers = -1;
+bool
+	bLinear,
+	bFalling,
+	bUsed[MAXPLAYERS+1];
+int
+	m_vecVelocity = -1;
+float
+	fFallSpeed,
+	fDecrease;
 
-new Handle:g_fallspeed,
-	Handle:g_linear,
-	Handle:g_decrease;
-
-new bool:isfallspeed,
-	bool:inUse[MAXPLAYERS+1],
-	bool:hasPara[MAXPLAYERS+1];
-
-public Plugin:myinfo =
+public Plugin myinfo =
 {
-	name		= "SM Parachute",
-	author		= "SWAT_88",
+	name		= PL_NAME,
+	version		= PL_VER,
 	description	= "To use your parachute press and hold SPACE(+jump) button while falling.",
-	version		= PARACHUTE_VERSION,
+	author		= "SWAT_88 (rewritten by Grey83)",
 	url			= "https://forums.alliedmods.net/showthread.php?p=580269"
-};
+}
 
-public OnPluginStart()
+public void OnPluginStart()
 {
-	LoadTranslations ("sm_parachute.phrases");
+	LoadTranslations("sm_parachute.phrases");
 
-	CreateConVar("sm_parachute_version", PARACHUTE_VERSION, "SM Parachute Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY|FCVAR_DONTRECORD);
-	g_fallspeed	= CreateConVar("sm_parachute_fallspeed","100", "Speed of the fall when you use the parachute", FCVAR_NONE);
-	g_linear	= CreateConVar("sm_parachute_linear","0", "0: disables linear fallspeed - 1: enables it", FCVAR_NONE, true, 0.0, true, 1.0);
-	g_decrease	= CreateConVar("sm_parachute_decrease","50", "0: dont use Realistic velocity-decrease - x: sets the velocity-decrease.");
-	
+	CreateConVar("sm_parachute_version", PL_VER, PL_NAME, FCVAR_DONTRECORD|FCVAR_NOTIFY|FCVAR_SPONLY);
+
+	ConVar cvar;
+	HookConVarChange((cvar = CreateConVar("sm_parachute_linear","0", "0: disables linear fallspeed - 1: enables it", FCVAR_NONE, true, 0.0, true, 1.0)), CVarChanged_Linear);
+	bLinear = cvar.BoolValue;
+
+	HookConVarChange((cvar = CreateConVar("sm_parachute_fallspeed","100", "Speed of the fall when you use the parachute")), CVarChanged_FallSpeed);
+	fFallSpeed = cvar.FloatValue;
+
+	HookConVarChange((cvar = CreateConVar("sm_parachute_decrease","50", "0: dont use Realistic velocity-decrease - x: sets the velocity-decrease.")), CVarChanged_Decrease);
+	fDecrease = cvar.FloatValue;
+
 	AutoExecConfig(true, "sm_parachute_reduced");
-	
-	g_iVelocity = FindSendPropOffs("CBasePlayer", "m_vecVelocity[0]");
-	g_maxplayers = GetMaxClients();
+
+	m_vecVelocity = FindSendPropInfo("CBasePlayer", "m_vecVelocity[0]");
 	HookEvent("player_death",PlayerDeath);
-	HookConVarChange(g_linear, CvarChange_Linear);
 }
 
-public OnPluginEnd(){
-	CloseHandle(g_fallspeed);
-	CloseHandle(g_linear);
-	CloseHandle(g_decrease);
-}
-
-public OnEventShutdown()
+public void CVarChanged_Linear(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	UnhookEvent("player_death",PlayerDeath);
+	bLinear = cvar.BoolValue;
+	if(!bLinear) for(int i = 1; i <= MaxClients; i++) if(IsClientInGame(i) && IsPlayerAlive(i) && bUsed[i])
+		SetEntityMoveType(i, MOVETYPE_WALK);
 }
 
-public OnClientPutInServer(client)
+public void CVarChanged_FallSpeed(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	inUse[client] = false;
-	hasPara[client] = false;
-	g_maxplayers = GetMaxClients();
+	fFallSpeed = cvar.FloatValue;
 }
 
-public OnClientDisconnect(client){
-	g_maxplayers = GetMaxClients();
+public void CVarChanged_Decrease(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	fDecrease = cvar.FloatValue;
 }
 
-public Action:PlayerDeath(Handle:event, const String:name[], bool:dontBroadcast){
-	new client;
-	client = GetClientOfUserId(GetEventInt(event, "userid"));
-	hasPara[client] = false;
+public void OnClientPutInServer(int client)
+{
+	bUsed[client] = false;
+}
+
+public void PlayerDeath(Event event, const char[] name, bool dontBroadcast)
+{
+	int client = GetClientOfUserId(event.GetInt("userid"));
 	EndPara(client);
-	return Plugin_Continue;
 }
 
-public StartPara(client,bool:open)
+public void OnGameFrame()
 {
-	decl Float:velocity[3];
-	decl Float:fallspeed;
-	if (g_iVelocity == -1) return;
-	fallspeed = GetConVarFloat(g_fallspeed)*(-1.0);
-	GetEntDataVector(client, g_iVelocity, velocity);
-	if(velocity[2] >= fallspeed) isfallspeed = true;
-	if(velocity[2] < 0.0)
+	static int i;
+	static float speed[3], fallspeed;
+	for(i = 1; i <= MaxClients; i++) if(IsClientInGame(i) && IsPlayerAlive(i))
 	{
-		if(isfallspeed && GetConVarInt(g_linear) == 0) {}
-		else if((isfallspeed && GetConVarInt(g_linear) == 1) || GetConVarFloat(g_decrease) == 0.0) velocity[2] = fallspeed;
-		else velocity[2] = velocity[2] + GetConVarFloat(g_decrease);
-		TeleportEntity(client, NULL_VECTOR, NULL_VECTOR, velocity);
-		SetEntDataVector(client, g_iVelocity, velocity);
-		SetEntityGravity(client,0.1);
-	}
-}
-
-public EndPara(client)
-{
-	SetEntityGravity(client,1.0);
-	inUse[client]=false;
-}
-
-public Check(client)
-{
-	static Float:speed[3];
-	GetEntDataVector(client,g_iVelocity,speed);
-	static cl_flags;
-	cl_flags = GetEntityFlags(client);
-	if(speed[2] >= 0 || (cl_flags & FL_ONGROUND)) EndPara(client);
-}
-
-public OnGameFrame()
-{
-	static x;
-	for (x = 1; x <= g_maxplayers; x++)
-	{
-		if (IsClientInGame(x) && IsPlayerAlive(x))
+		if(GetClientButtons(i) & IN_JUMP)
 		{
-			static cl_buttons;
-			cl_buttons = GetClientButtons(x);
-			if (cl_buttons & IN_JUMP)
+			if(!bUsed[i])
 			{
-				if (!inUse[x])
-				{
-					inUse[x] = true;
-					isfallspeed = false;
-					StartPara(x,true);
-				}
-				StartPara(x,false);
+				bUsed[i] = true;
+				bFalling = false;
 			}
-			else if (inUse[x])
+			fallspeed = fFallSpeed*(-1.0);
+			GetEntDataVector(i, m_vecVelocity, speed);
+			if(speed[2] >= fallspeed) bFalling = true;
+			if(speed[2] < 0.0)
 			{
-				inUse[x] = false;
-				EndPara(x);
+				if(bFalling && !bLinear) {}
+				else if(bFalling && bLinear || !fDecrease) speed[2] = fallspeed;
+				else speed[2] += fDecrease;
+				TeleportEntity(i, NULL_VECTOR, NULL_VECTOR, speed);
+				SetEntDataVector(i, m_vecVelocity, speed);
+				SetEntityGravity(i, 0.1);
 			}
-			Check(x);
 		}
+		else if(bUsed[i])
+		{
+			bUsed[i] = false;
+			EndPara(i);
+		}
+		GetEntDataVector(i, m_vecVelocity, speed);
+		if(speed[2] >= 0 || GetEntityFlags(i) & FL_ONGROUND) EndPara(i);
 	}
 }
 
-public CvarChange_Linear(Handle:cvar, const String:oldvalue[], const String:newvalue[]){
-	if (StringToInt(newvalue) == 0)
-	{
-		for (new client = 1; client <= g_maxplayers; client++)
-		{
-			if (IsClientInGame(client) && IsPlayerAlive(client) && hasPara[client]) SetEntityMoveType(client,MOVETYPE_WALK);
-		}
-	}
+stock void EndPara(int client)
+{
+	SetEntityGravity(client, 1.0);
+	bUsed[client] = false;
 }
