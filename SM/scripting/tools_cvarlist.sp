@@ -1,7 +1,10 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-static const char FLAGS[][][] =	// старый - новый
+static const char
+	CMD_DUMP[]	= "addons/sourcemod/! cmdlist_%Y.%m.%d-%H.%M.%S.cfg",
+	CVAR_DUMP[]	= "addons/sourcemod/! cvarlist_%Y.%m.%d-%H.%M.%S.cfg",
+	FLAGS[][][]	=
 {	// old flags			new flags
 	{"UNREGISTERED",	"UNREGISTERED"},
 	{"LAUNCHER",		"DEVELOPMENTONLY"},			//new
@@ -86,7 +89,7 @@ cmdArray = CreateArray(ByteCountToCells(256));
 	GetCurrentMap(map, sizeof(map));
 	GetGameInformation(version, game, appid);
 
-	FormatTime(path, sizeof(path), "addons/sourcemod/! cmdlist_%Y.%m.%d-%H.%M.%S.cfg");
+	FormatTime(path, sizeof(path), CMD_DUMP);
 	file = OpenFile(path, "a+");
 	size = GetArraySize(cmdArray);
 	SortADTArray(cmdArray, Sort_Ascending, Sort_String);
@@ -115,7 +118,7 @@ cmdArray = CreateArray(ByteCountToCells(256));
 	CloseHandle(cmdTrieFlags);
 	PrintToServer("Command dump finished. \"%s\"", path);
 
-	FormatTime(path, sizeof(path), "addons/sourcemod/! cvarlist_%Y.%m.%d-%H.%M.%S.cfg");
+	FormatTime(path, sizeof(path), CVAR_DUMP);
 	file = OpenFile(path, "a+");
 	size = GetArraySize(cvarArray);
 	SortADTArray(cvarArray, Sort_Ascending, Sort_String);
