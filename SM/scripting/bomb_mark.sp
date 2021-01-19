@@ -125,8 +125,8 @@ stock void MarkSpawn(int bomb, const int green)
 	AcceptEntityInput(mark, "ColorBlueValue");
 	DispatchKeyValue(mark, "rendermode", "5");
 	SetVariantString("!activator");
-	AcceptEntityInput(mark, "SetParent", bomb, ent, 0);
-	if(DispatchSpawn(mark)) SDKHook(ent, SDKHook_SetTransmit, Hook_Transmit);
+	AcceptEntityInput(mark, "SetParent", bomb, mark, 0);
+	if(DispatchSpawn(mark)) SDKHook(mark, SDKHook_SetTransmit, Hook_Transmit);
 }
 
 public Action Hook_Transmit(int mark, int client)
