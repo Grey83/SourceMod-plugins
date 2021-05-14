@@ -21,7 +21,7 @@ enum
  * @return			Player information by selected type (-1 for wrong type)
  * @error			Invalid client index, client not connected, or fake client.
  */
-forward int Revival_GetPlayerInfo(int сlient, int type);
+forward int Revival_GetPlayerInfo(int client, int type);
 
 /**
  * Called when a client changed status.
