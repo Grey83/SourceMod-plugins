@@ -1,0 +1,8 @@
+"Phrases"
+{
+	"HintInfo"
+	{
+		"en"		"For a weak throw use RMB"
+		"ru"		"Для слабого броска используйте ПКМ"
+	}
+}
