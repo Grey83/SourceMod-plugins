@@ -15,16 +15,22 @@
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.3_fix"
-#endif
-
-
+	#define PL_VER	"1.1.4_b07.10.2021"
+#else
 static const char
-#if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.3_fix",
+	PL_VER[]	= "1.1.4_b07.10.2021";
 #endif
 
+static const int
+	COLOR[]		= {0xff3f1f, 0x1f3fff, 0x00bf00, 0x00bf00},	// marks (T, CT, Any) & HUD
+	KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
+static const float
+	NULL_PERCENT[MAXPLAYERS+1]	= {0.0, ...},
+	EFF_LIFE	= 1.0,	// частота обновления эффекта
+	MARK_SIZE	= 0.3,	// размер меток
+	UPDATE		= 5.0;	// минимальная частота обновления информации HUD и KeyHint - раз в 5 секунд
+static const char
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS OB
 	MARK_V34[]	= "sprites/glow",		//		-//-		  CSSv34
 	KEY_NAME[][]= {"Ctrl", "E", "Shift"},
@@ -47,15 +53,6 @@ static const char
 	{"{PURPLE}",	"\x0E",	"\x07FA00FA",	""},
 	{"{LIGHTRED2}",	"\x0F",	"\x07FF8080",	""}
 };
-
-static const int
-	COLOR[]		= {0xff3f1f, 0x1f3fff, 0x00bf00, 0x00bf00},	// T, CT, Any
-	KEY_VAL[]	= {IN_DUCK, IN_USE, IN_SPEED};
-static const float
-	NULL_PERCENT[MAXPLAYERS+1]	= {0.0, ...},
-	EFF_LIFE	= 1.0,	// частота обновления эффекта
-	MARK_SIZE	= 0.3,	// размер меток
-	UPDATE		= 5.0;	// минимальная частота обновления информации HUD и KeyHint - раз в 5 секунд
 
 enum
 {
@@ -99,12 +96,16 @@ bool
 	bEffect,
 	bDeath,
 	bSprites,
-	bReset;
+	bReset,
+	bTogether,
+	bLastMan,
+	bDuel;
 float
 	fRadius,
 	fNoDmgTime,
 	fPosX,
-	fPosY;
+	fPosY,
+	fDuckTime[MAXPLAYERS+1];
 int
 	iKey[MAXPLAYERS+1],
 	iHUD[MAXPLAYERS+1],
@@ -119,7 +120,8 @@ int
 	iFrag,
 	iRIP,
 	iColor[4],
-	iBalance;
+	iBalance,
+	iFeed;
 char
 	sCvarPath[PLATFORM_MAX_PATH],
 	sSound[PLATFORM_MAX_PATH],
@@ -127,7 +129,7 @@ char
 	sKeyHintText[MAXPLAYERS+1][1024];
 
 Handle
-	hFwd_PlayerRevived,
+	hFwd_PlayerReviving,
 	hCookies,
 	hHUD,
 	hTimer,
@@ -139,14 +141,16 @@ bool
 	bAllowed = true,
 	bProto,
 	bProtected[MAXPLAYERS+1],
-	bDefault[3];
+	bDefault[3],
+	bBlocked;
 int
 	iEngine,
 	iOffsetGroup,
 	hBeam = -1,
 	hHalo = -1,
 	iMarkRef[MAXPLAYERS+1] = {-1, ...},
-	iTimesRevived[MAXPLAYERS+1],
+	iUses[MAXPLAYERS+1],
+	iRevived[MAXPLAYERS+1],
 	iTeam[MAXPLAYERS+1],
 	iDeathTeam[MAXPLAYERS+1],
 	iTarget[MAXPLAYERS+1],
@@ -172,6 +176,10 @@ public Plugin myinfo =
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	CreateNative("Revival_GetPlayerInfo", Native_GetPlayerInfo);
+	CreateNative("Revival_SetPlayerInfo", Native_SetPlayerInfo);
+
+	hFwd_PlayerReviving	= CreateGlobalForward("Revival_OnPlayerReviving", ET_Ignore, Param_Cell, Param_Cell, Param_CellByRef, Param_CellByRef, Param_CellByRef);
+
 	RegPluginLibrary("revival");
 	bLate = late;
 	return APLRes_Success;
@@ -190,16 +198,58 @@ public int Native_GetPlayerInfo(Handle plugin, int numParams)
 	switch(GetNativeCell(2))
 	{
 		case RI_Revives:	return iRevives[client][0];
-		case RI_Revived:	return iTimesRevived[client];
+		case RI_Revived:	return iRevived[client];
 		case RI_Target:		return iTarget[client];
 		case RI_Percents:	return iPercents[client];
 	}
-	return -1;
+
+	return ThrowNativeError(SP_ERROR_NATIVE, "Invalid information type");
 }
 
-public int Native_OnPlayerStatusChanged(Handle plugin, int numParams)
+public int Native_SetPlayerInfo(Handle plugin, int numParams)
 {
-	AddToForward(hFwd_PlayerRevived, plugin, GetNativeFunction(1));
+	int client = GetNativeCell(1);
+	if(client < 1 || client > MaxClients)
+		return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", client);
+	if(!IsClientConnected(client))
+		return ThrowNativeError(SP_ERROR_NATIVE, "Client %d is not connected", client);
+	if(IsFakeClient(client))
+		return ThrowNativeError(SP_ERROR_NATIVE, "Client %d is a bot", client);
+
+	int value = GetNativeCell(3);
+	switch(GetNativeCell(2))
+	{
+		case RI_Revives:
+		{
+			if(value < 0) return ThrowNativeError(SP_ERROR_NATIVE, "Invalid value (%i). Value cannot be negative.", value);
+
+			iRevives[client][0]	= value;
+		}
+		case RI_Revived:
+		{
+			if(value < 0) return ThrowNativeError(SP_ERROR_NATIVE, "Invalid value (%i). Value cannot be negative.", value);
+
+			iRevived[client]	= value;
+		}
+		case RI_Target:
+		{
+			if(value < 1 || value > MaxClients)
+				return ThrowNativeError(SP_ERROR_NATIVE, "Invalid client index (%d)", value);
+			if(!IsClientConnected(client))
+				return ThrowNativeError(SP_ERROR_NATIVE, "Client %d is not connected", value);
+
+			iTarget[client]		= value;
+		}
+		case RI_Percents:
+		{
+			if(value < 0) return ThrowNativeError(SP_ERROR_NATIVE, "Invalid value (%i). Value cannot be negative or greater than 100.", value);
+
+			iPercents[client]	= value;
+		}
+		default: ThrowNativeError(SP_ERROR_NATIVE, "Invalid information type");
+	}
+
+	return 0;
 }
 
 public void OnPluginStart()
@@ -214,8 +264,6 @@ public void OnPluginStart()
 			iEngine = E_Old;
 		default: SetFailState("Plugin for CS:S and CS:GO only!");
 	}
-
-	hFwd_PlayerRevived = CreateGlobalForward("Revival_OnPlayerRevived", ET_Event, Param_Cell, Param_Cell, Param_Cell);
 
 	bProto = GetFeatureStatus(FeatureType_Native, "GetUserMessageType") == FeatureStatus_Available && GetUserMessageType() == UM_Protobuf;
 
@@ -258,7 +306,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Enemy);
 	bEnemy = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_bar", "1", "Enable/disable progressbar for reviving", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_bar", "1", "Enable/disable progressbar for reviving", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Bar);
 	bBar[0] = cvar.BoolValue;
 
@@ -289,6 +337,10 @@ public void OnPluginStart()
 	cvar = CreateConVar("sm_revival_reset", "0", "Reset counter of revived (for cvar 'sm_revival_times') at every: 0 - round, 1 - spawn", FCVAR_NOTIFY, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Reset);
 	bReset = cvar.BoolValue;
+
+	cvar = CreateConVar("sm_revival_risings", "0", "How many times can a player will revived by other players during the round (0 - unlimited)", FCVAR_NOTIFY, true);
+	cvar.AddChangeHook(CVarChanged_Risings);
+	iRevived[0] = cvar.IntValue;
 
 	cvar = CreateConVar("sm_revival_noblock_time", "2", "Noblocking time after respawn(set at 0 if you have any noblock plugin)", _, true);
 	cvar.AddChangeHook(CVarChanged_NoBlockTime);
@@ -381,6 +433,22 @@ public void OnPluginStart()
 		iHUD[0] = cvar.IntValue;
 	}
 
+	cvar = CreateConVar("sm_revival_together", "1", "Can more than 1 alive player try to revive a player at the same time (0 - 1 reviver per 1 dead player)", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Together);
+	bTogether = cvar.BoolValue;
+
+	cvar = CreateConVar("sm_revival_feed", "7", "Show revives in the killfeed to the: 1 - allies, 2 - enemies, 4 - spectators", _, true, _, true, 7.0);
+	cvar.AddChangeHook(CVarChanged_Feed);
+	iFeed = cvar.IntValue;
+
+	cvar = CreateConVar("sm_revival_last_man", "0", "Disable revives when only one player is alive on one of the teams", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_LastMan);
+	bLastMan = cvar.BoolValue;
+
+	cvar = CreateConVar("sm_revival_duel", "0", "Disable revives when both teams have one player alive", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Duel);
+	bDuel = cvar.BoolValue;
+
 	if(iEngine == E_CSS) HookUserMessage(GetUserMessageId("KeyHintText"), HookKeyHintText, true);
 
 	hCookies = RegClientCookie("revive", "Revive clients settings", CookieAccess_Private);
@@ -407,7 +475,7 @@ public void OnPluginStart()
 			bBar[i] = bBar[0];
 			iHUD[i] = iHUD[0];
 		}
-		else GetCookieValue(i);
+		else ReadClientSettings(i);
 	}
 	CountAlive();
 	bLate = false;
@@ -500,6 +568,11 @@ public void CVarChanged_Times(ConVar cvar, const char[] oldVal, const char[] new
 public void CVarChanged_Reset(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
 	bReset = cvar.BoolValue;
+}
+
+public void CVarChanged_Risings(ConVar cvar, const char[] oldVal, const char[] newVal)
+{
+	iRevived[0] = cvar.IntValue;
 }
 
 public void CVarChanged_NoBlockTime(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -683,6 +756,28 @@ public void CVarChanged_HUDMode(ConVar cvar, const char[] oldValue, const char[]
 	iHUD[0] = cvar.IntValue;
 }
 
+public void CVarChanged_Together(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	bTogether = cvar.BoolValue;
+}
+
+public void CVarChanged_Feed(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iFeed = cvar.IntValue;
+}
+
+public void CVarChanged_LastMan(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	bLastMan = cvar.BoolValue;
+	CountAlive();
+}
+
+public void CVarChanged_Duel(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	bDuel = cvar.BoolValue;
+	CountAlive();
+}
+
 public void OnMapStart()
 {
 	Handle gameConfig = LoadGameConfigFile("funcommands.games");
@@ -708,6 +803,11 @@ public void OnMapStart()
 	if(sCvarPath[0]) AddSound();
 
 	if(bEnable) hTimer = CreateTimer(UPDATE, Timer_UpdateHUD, _, TIMER_REPEAT);
+}
+
+public void OnMapEnd()
+{
+	for(int i = 1; i <= MaxClients; i++) if(hTimerClear[i]) delete hTimerClear[i];
 }
 
 stock void AddSound()
@@ -736,7 +836,7 @@ public Action Timer_UpdateHUD(Handle timer)
 	return Plugin_Continue;
 }
 
-static void UpdateHUD(const int client, const bool set = true)
+stock void UpdateHUD(const int client, const bool set = true)
 {
 	if(iEngine == E_Old || !iHUD[client]) return;
 
@@ -752,7 +852,7 @@ static void UpdateHUD(const int client, const bool set = true)
 	static char txt[256];
 	txt[0] = 0;
 
-	if(iTimes) FormatEx(txt, sizeof(txt), "%t\n", "HUDCounter", iTimes - iTimesRevived[target], iTimes);
+	if(iTimes) FormatEx(txt, sizeof(txt), "%t\n", "HUDCounter", iTimes - iUses[target], iTimes);
 
 	if(iBalance != -1 && (iTeam[target] == CS_TEAM_CT ? iDiff : -iDiff) >= iBalance)
 		Format(txt, sizeof(txt), "%s%t", txt, iTeam[target] == 2 ? "HUDBalanceT" : "HUDBalanceCt");
@@ -798,36 +898,23 @@ public Action HookKeyHintText(UserMsg msg_id, Handle msg, const int[] players, i
 	RequestFrame(RequestFrame_Callback, players[0]);
 
 	if(hTimerClear[players[0]]) delete hTimerClear[players[0]];
-	if(sKeyHintText[players[0]][0]) hTimerClear[players[0]] = CreateTimer(UPDATE, Timer_ClearBuffer, GetClientUserId(players[0]), TIMER_FLAG_NO_MAPCHANGE);
+	if(sKeyHintText[players[0]][0]) hTimerClear[players[0]] = CreateTimer(UPDATE, Timer_ClearBuffer, GetClientUserId(players[0]));
 
 	return Plugin_Handled;
 }
 
 public Action Timer_ClearBuffer(Handle timer, int client)
 {
-	if((client = GetClientOfUserId(client))) sKeyHintText[client][0] = 0;
-	timer = null;
+	if((client = GetClientOfUserId(client)))
+	{
+		sKeyHintText[client][0] = 0;
+		hTimerClear[client] = null;
+	}
 }
 
 public void RequestFrame_Callback(int client)
 {
 	UpdateHUD(client);
-}
-
-public void OnClientConnected(int client)
-{
-	iTimesRevived[client] = iTarget[client] = iReviver[client] = sKeyHintText[client][0] = 0;
-
-	if(client && !IsFakeClient(client))
-	{
-		if(!AreClientCookiesCached(client))
-		{
-			iKey[client] = iKey[0];
-			bBar[client] = bBar[0];
-			iHUD[client] = iHUD[0];
-		}
-		else GetCookieValue(client);
-	}
 }
 
 public void Cookie_Revive(int client, CookieMenuAction action, any info, char[] buffer, int maxlen)
@@ -917,10 +1004,10 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 
 public void OnClientCookiesCached(int client)
 {
-	if(client && !IsFakeClient(client)) GetCookieValue(client);
+	if(!client || IsFakeClient(client)) ReadClientSettings(client);
 }
 
-stock void GetCookieValue(int client)
+stock void ReadClientSettings(int client)
 {
 	static char buffer[4];
 	GetClientCookie(client, hCookies, buffer, sizeof(buffer));
@@ -942,10 +1029,12 @@ public void OnClientDisconnect(int client)
 	if(hTimerClear[client]) delete hTimerClear[client];
 	CountAlive();
 	RemoveMark(client);
-	iDeathTeam[client] = sKeyHintText[client][0] = 0;
+	iUses[client] = iRevived[client] = iTarget[client] = iDeathTeam[client] = sKeyHintText[client][0] = 0;
+	fDuckTime[client] = 0.0;
 	iTeam[client] = CS_TEAM_NONE;
 	bProtected[client] = false;
 	for(int i = 1; i <= MaxClients; i++) if(i != client && iTarget[i] == client) iTarget[i] = 0;
+
 }
 
 public void Event_Team(Event event, const char[] name, bool dontBroadcast)
@@ -953,7 +1042,7 @@ public void Event_Team(Event event, const char[] name, bool dontBroadcast)
 	static int client;
 	if(!(client = GetClientOfUserId(event.GetInt("userid")))) return;
 
-	sKeyHintText[client][0] = 0;
+	sKeyHintText[client][0] = iReviver[client] = 0;
 	if(((iTeam[client] = event.GetInt("team")) < CS_TEAM_T) || (!bTeam && iTeam[client] != iDeathTeam[client]))
 	{
 		ResetRespawnData(client);
@@ -970,7 +1059,7 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 
 	sKeyHintText[client][0] = 0;
 	CountAlive();
-	if(!bEnable || !bAllowed || iRIP & 1 && event.GetBool("headshot"))
+	if(!bEnable || !bAllowed || iRIP & 1 && event.GetBool("headshot") || iRevived[0] && iRevived[client] >= iRevived[0])
 		return;
 
 	if(iRIP & 2)
@@ -1015,18 +1104,25 @@ public void Event_Spawn(Event event, const char[] name, bool dontBroadcast)
 
 	RemoveMark(client);
 	ResetPercents(client);
-	iDeathTeam[client] = iTarget[client] = iReviver[client] = 0;
+	iDeathTeam[client] = iTarget[client] = sKeyHintText[client][0] = 0;
 	iTeam[client] = GetClientTeam(client);
 	CountAlive();
+	UpdateHUD(client);
 }
 
 stock void CountAlive()
 {
-	static int i;
-	iDiff = 0;
-	for(i = 1; i <= MaxClients; i++)
-		if(IsClientInGame(i) && (iTeam[i] = GetClientTeam(i)) > CS_TEAM_SPECTATOR && IsPlayerAlive(i))
-			iDiff += (iTeam[i] == CS_TEAM_CT) ? 1 : -1;
+	static int i, t, ct;
+	i = t = ct = iDiff = 0;
+	while(++i <= MaxClients) if(IsClientInGame(i) && (iTeam[i] = GetClientTeam(i)) > 1 && IsPlayerAlive(i))
+	{
+		if(iTeam[i] == CS_TEAM_CT)
+			ct++;
+		else t++;
+	}
+	iDiff = t - ct;
+
+	bBlocked = bLastMan && (t == 1 || ct == 1) || bDuel && t == 1 && ct == 1;
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -1045,14 +1141,14 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 	}
 	for(i = 1; i <= MaxClients; i++)
 	{
-		iRevives[i][0] = iRevives[i][1] = iTarget[i] = sKeyHintText[i][0] = 0;
+		iRevives[i][0] = iRevives[i][1] = iRevived[i] = iTarget[i] = sKeyHintText[i][0] = 0;
 		bProtected[i] = false;
 	}
 }
 
 public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 {
-	bAllowed = false;
+	bAllowed = bBlocked = false;
 	ShowTop();
 	ShowAntiTop();
 	for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i, true);
@@ -1164,9 +1260,21 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1], pos[3];
 	static char name[MAX_NAME_LENGTH];
 
+	cant = false;
+	time = GetGameTime();
+	if(fDuckTime[client] > time)
+	{
+		if(buttons & IN_DUCK) fDuckTime[client] = 0.0;
+		else
+		{
+			buttons |= IN_DUCK;
+			cant = true;
+			if(!bProtected[client]) return Plugin_Changed;
+		}
+	}
+
 	if(bProtected[client])
 	{
-		cant = false;
 		if(buttons & IN_ATTACK)
 		{
 			buttons &= ~IN_ATTACK;
@@ -1185,10 +1293,9 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 */		return cant ? Plugin_Changed : Plugin_Continue;
 	}
 
-	if(!bEnable || !bAllowed || !IsPlayerValid(client) || (iTimes && iTimesRevived[client] >= iTimes))
+	if(!bEnable || !bAllowed || !bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
 		return Plugin_Continue;
 
-	time = GetGameTime();
 	if(iBalance != -1 && iTeam[client] > CS_TEAM_SPECTATOR && (iKey[client] == 3 || buttons & KEY_VAL[iKey[client]])
 	&& ((iTeam[client] == CS_TEAM_CT ? iDiff : -iDiff) >= iBalance))
 	{
@@ -1336,7 +1443,12 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 #else
 			perc = RoundToNearest(((time - start[client])/iCD)*100);
 #endif
-			if(perc >= 100) InitRespawn(client, target[client], diff);
+			if(perc >= 100)
+			{
+				buttons |= IN_DUCK;
+				fDuckTime[target[client]] = 2 + time;
+				InitRespawn(client, target[client], health, health - diff);
+			}
 			else if(iPercents[client] != perc)
 			{
 				iPercents[client] = perc;
@@ -1429,18 +1541,20 @@ stock void SetMarkColor(const int client)
 
 stock void ResetRespawnData(int client, bool round = false)
 {
+	fDuckTime[client] = 0.0;
 	SendProgressBar(client);
 	fProgress[client] = NULL_PERCENT;
 	iDeathTeam[client] = iTarget[client] = iReviver[client] = iPercents[client] = 0;
-	if(bReset || round) iTimesRevived[client] = 0;
+	if(bReset || round) iUses[client] = 0;
 	RemoveMark(client);
 }
 
-static void RemoveMark(int client)
+stock void RemoveMark(int client)
 {
 	static int ent;
 	if((ent = GetMarkId(client)) != -1) AcceptEntityInput(ent, "Kill");
 	iMarkRef[client] = -1;
+	iReviver[client] = 0;
 }
 
 stock void ResetPercents(int client)
@@ -1463,8 +1577,9 @@ stock int GetNearestTarget(int client)
 	if(!bEnemy) team = GetClientTeam(client);
 	GetClientAbsOrigin(client, pos);
 
-	for(i = 1, target = 0, min_dist = fRadius; i < MaxClients; i++)
-		if(i != client && iDeathTeam[i] > 1 && (bEnemy || team == iDeathTeam[i])
+	i = target = 0, min_dist = fRadius;
+	while(++i <= MaxClients) if(i != client && (bTogether || !iReviver[i] || iReviver[i] == client)
+		&& iDeathTeam[i] > 1 && (bEnemy || team == iDeathTeam[i]) 
 		&& FloatCompare(min_dist, (dist[i] = GetVectorDistance(pos, fDeathPos[i]))) == 1)
 		{
 			min_dist = dist[i];
@@ -1477,6 +1592,8 @@ stock int GetNearestTarget(int client)
 stock void SaveProgress(const int client, const int target, const float start, const float stop)
 {
 	if(!target) return;
+
+	if(iReviver[target] == client) iReviver[target] = 0;
 #if SOURCEMOD_V_MINOR < 10
 	if(bPercent) fProgress[client][target] = FloatSub(stop, start);
 #else
@@ -1485,27 +1602,55 @@ stock void SaveProgress(const int client, const int target, const float start, c
 	else fProgress[client][target] = 0.0;
 }
 
-stock Action InitRespawn(int client, int target, int hp)
+stock void InitRespawn(int client, int target, int health, int diff)
 {
 	if(!IsPlayerAlive(client) || !IsClientValid(target, true))	// не факт что необходима
-		return Plugin_Handled;
+		return;
 
 	SaveStats(client);
 	RemoveMark(client);
 	ResetPercents(client);
 	SendProgressBar(client, target);
-	iTarget[client] = iReviver[target] = 0;
 
-	static int buffer;
-	if(bEnemy && (buffer = GetClientTeam(client)) != iDeathTeam[target]) CS_SwitchTeam(target, buffer);
+	int frags = iFrag, hp = iHP;
+	Call_StartForward(hFwd_PlayerReviving);
+	Call_PushCell(client);
+	Call_PushCell(target);
+	Call_PushCellRef(frags);
+	Call_PushCellRef(diff);
+	if(diff < 0) diff = 0;
+	Call_PushCellRef(hp);
+	if(hp < 1) hp = 1;
+	Call_Finish();
+
+	int buffer;
+	if((buffer = GetClientTeam(client)) != iDeathTeam[target] && bEnemy) CS_SwitchTeam(target, buffer);
 	CS_RespawnPlayer(target);
 	if(!bPos) GetClientAbsOrigin(client, fDeathPos[target]);
 	TeleportEntity(target, fDeathPos[target], fDeathAng[target], NULL_VECTOR);
-	SetEntityHealth(target, iHP);
+	SetEntityHealth(target, hp);
 	SetEntPropFloat(client, Prop_Send, "m_flFlashDuration", 0.0);
 
-	if((buffer = GetEntProp(target, Prop_Data, "m_iDeaths")) > 0) SetEntProp(target, Prop_Data, "m_iDeaths", buffer-1);
-	if(iFrag) SetEntProp(client, Prop_Data, "m_iFrags", GetEntProp(client, Prop_Data, "m_iFrags")+iFrag);
+	if(iFeed)
+	{
+		Event event = CreateEvent("player_death");
+		if(event)
+		{
+			event.SetInt("userid", GetClientUserId(target));
+			event.SetInt("attacker", GetClientUserId(client));
+			event.SetString("weapon", "shieldgun");
+			for(int i = 1, t; i <= MaxClients; i++)
+				if(IsClientInGame(i) && !IsFakeClient(i)
+				&& ((t = GetClientTeam(i) == buffer) && iFeed & 1 || t == 5 - buffer && iFeed & 2 || t < 2 && iFeed & 4))
+					event.FireToClient(i);
+			event.Cancel();
+		}
+	}
+
+	if((buffer = GetEntProp(target, Prop_Data, "m_iDeaths")) > 0) SetEntProp(target, Prop_Data, "m_iDeaths", buffer - 1);
+
+	if(frags) SetEntProp(client, Prop_Data, "m_iFrags", GetEntProp(client, Prop_Data, "m_iFrags") + frags);
+
 	if(bMsg)
 	{
 		static char name[MAX_NAME_LENGTH];
@@ -1513,11 +1658,13 @@ stock Action InitRespawn(int client, int target, int hp)
 		PrintToChatClr(client, "%t%t", "ChatTag", iFrag ? "TargetRevivedFrag" : "TargetRevived", name);
 		PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", client);
 	}
+
 	if(sSound[0]) EmitAmbientSound(sSound, fDeathPos[target]);
 
-	if(iHPCost)
+	if(diff)
 	{
-		if(hp > 0) SetEntityHealth(client, hp);
+		health += diff;
+		if(health > 0) SetEntityHealth(client, health);
 		else ForcePlayerSuicide(client);
 	}
 
@@ -1537,22 +1684,13 @@ stock Action InitRespawn(int client, int target, int hp)
 
 	UpdateHUD(client);
 
-	iTimesRevived[client]++;
+	iUses[client]++;
+	iRevived[target]++;
 
-	Call_StartForward(hFwd_PlayerRevived);
-	Call_PushCell(client);
-	Call_PushCell(target);
-	Call_PushCell(iFrag);
-	Call_Finish();
+	if(!iTimes || !bMsg && hTimer) return;
 
-	if(!iTimes) return Plugin_Handled;
-
-	if(!bMsg && hTimer) return Plugin_Handled;
-
-	if(iTimesRevived[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
-	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iTimesRevived[client]);
-
-	return Plugin_Handled;
+	if(iUses[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
+	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iUses[client]);
 }
 
 public Action Timer_EnableDmg(Handle timer, any client)
@@ -1587,7 +1725,7 @@ stock void SendProgressBar(const int client, const int target = 0, const float t
 	SetProgressBar(target, time, left);
 }
 
-static void SetProgressBar(const int client, const float time, const int left)
+stock void SetProgressBar(const int client, const float time, const int left)
 {
 	if(!IsClientValid(client) || !bBar[client]) return;
 
