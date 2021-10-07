@@ -1004,7 +1004,7 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 
 public void OnClientCookiesCached(int client)
 {
-	if(!client || IsFakeClient(client)) ReadClientSettings(client);
+	if(client && !IsFakeClient(client)) ReadClientSettings(client);
 }
 
 stock void ReadClientSettings(int client)
