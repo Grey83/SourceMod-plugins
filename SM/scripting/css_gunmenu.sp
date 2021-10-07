@@ -11,13 +11,13 @@
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"[CSS] Gun Menu"
-	#define PL_VER	"1.1.2"
+	#define PL_VER	"1.1.3 07.10.2021"
 #endif
 
 static const char
 #if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "[CSS] Gun Menu",
-	PL_VER[]	= "1.1.2",
+	PL_VER[]	= "1.1.3 07.10.2021",
 #endif
 
 	WEAPON[][][][] =
@@ -336,7 +336,7 @@ stock void SaveChoiceToCookies(int client)
 
 	static char buffer[12];
 	FormatEx(buffer, sizeof(buffer), "0x%08x", value);
-	PrintToServer("\n%N's choice: %s\n", client, buffer);
+//	PrintToServer("\n%N's choice: %s\n", client, buffer);
 	SetClientCookie(client, hCookies, buffer);
 }
 
@@ -349,15 +349,17 @@ public void OnClientPutInServer(int client)
 	SDKHook(client, SDKHook_WeaponDrop, OnWeaponDropped);
 }
 
-void OnWeaponDropped(int client, int wpn)
+public void OnWeaponDropped(int client, int wpn)
 {
-	if(wpn <= MaxClients) return;
+	static char cls[12];
+	if(wpn <= MaxClients || GetEntityClassname(wpn, cls, sizeof(cls)) && !strcmp(cls[7], "c4"))
+		return;
 
 	if(hDropped[wpn]) delete hDropped[wpn];
 	hDropped[wpn] = CreateTimer(fClear, Timer_CheckDropped, EntIndexToEntRef(wpn));
 }
 
-void OnWeaponEqiped(int client, int wpn)
+public void OnWeaponEqiped(int client, int wpn)
 {
 	if(hDropped[wpn]) delete hDropped[wpn];
 }
@@ -405,7 +407,7 @@ public void OnClientCookiesCached(int client)
 
 	char buffer[12];
 	GetClientCookie(client, hCookies, buffer, sizeof(buffer));
-	PrintToServer("\n%N's settings: %s\n", client, buffer);
+//	PrintToServer("\n%N's settings: %s\n", client, buffer);
 	if(buffer[0] != '0' || buffer[1] != 'x' || strlen(buffer) < 3 || strlen(buffer) > 10) return;
 
 	int value = StringToInt(buffer, 0x10), rnd = (value & 0xFF000000) >>> 24;
@@ -510,8 +512,7 @@ stock void ToggleBuyZones(bool enable = false)
 {
 	// убираем попытки ботов закупится при отключении зон покупок
 	static ConVar cvar;
-	if(!cvar) cvar = FindConVar("bot_eco_limit");
-	else
+	if(cvar || (cvar = FindConVar("bot_eco_limit")))
 	{
 		static int limit = -1;
 		if(limit == -1) limit = cvar.IntValue;
