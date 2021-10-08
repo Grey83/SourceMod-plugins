@@ -10,6 +10,8 @@
 
 #define PL_VER "2.5.0"
 
+static const int ADMIN_FLAG = ADMFLAG_ROOT;	// access flag for health commands
+
 Handle
 	hCookie,
 	hHUD,
@@ -43,9 +45,13 @@ public void OnPluginStart()
 {
 	bCSGO = GetEngineVersion() == Engine_CSGO;
 
-	CreateConVar("sm_bhud_version", PL_VER, "BossHud Version", FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY);
+	CreateConVar("sm_bhud_version", PL_VER, "BossHud Version", FCVAR_DONTRECORD|FCVAR_NOTIFY|FCVAR_SPONLY);
 
 	ConVar cvar;
+	cvar = CreateConVar("sm_bhud_enabled", "1", "The default state of info for newcomers.", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChange_Show);
+	CVarChange_Show(cvar, "", "");
+
 	cvar = CreateConVar("sm_bhud_center", "1", "Show text in: 0 - HUD, 1 - center.", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChange_Center);
 	bCenter = cvar.BoolValue;
@@ -58,7 +64,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChange_Symbols);
 	bSymbols = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_bhud_color", "f00", "HUD info color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = green", FCVAR_PRINTABLEONLY);
+	cvar = CreateConVar("sm_bhud_color", "f00", "HUD info color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = red.", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChange_Color);
 	CVarChange_Color(cvar, "", "");
 
@@ -66,19 +72,20 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChange_Update);
 	iUpdate = cvar.IntValue;
 
-	cvar = CreateConVar("sm_bhud_x", "0.99", "HUD info position X (0.0 - 1.0 left to right or -1 for center)", _, true, -2.0, true, 1.0);
+	cvar = CreateConVar("sm_bhud_x", "-1.0", "HUD info position X (0.0 - 1.0 left to right or -1.0 for center)", _, true, -2.0, true, 1.0);
 	cvar.AddChangeHook(CVarChange_PosX);
 	fPosX = cvar.FloatValue;
 
-	cvar = CreateConVar("sm_bhud_y", "0.75", "HUD info position Y (0.0 - 1.0 top to bottom or -1 for center)", _, true, -2.0, true, 1.0);
+	cvar = CreateConVar("sm_bhud_y", "0.09", "HUD info position Y (0.0 - 1.0 top to bottom or -1.0 for center)", _, true, -2.0, true, 1.0);
 	cvar.AddChangeHook(CVarChange_PosY);
 	fPosY = cvar.FloatValue;
 
-	RegAdminCmd("sm_addhp",		Cmd_EntityHP, ADMFLAG_GENERIC, "Add Current HP");
-	RegAdminCmd("sm_currenthp",	Cmd_EntityHP, ADMFLAG_GENERIC, "See Current HP");
-	RegAdminCmd("sm_subtracthp",Cmd_EntityHP, ADMFLAG_GENERIC, "Subtract Current HP");
+	AutoExecConfig(true, "bosshud");
 
-	RegConsoleCmd("sm_bhud",	Cmd_ToggleHud, "Toggle BHud");
+	RegAdminCmd("sm_addhp",		Cmd_EntityHP, ADMIN_FLAG, "Add Current HP");
+	RegAdminCmd("sm_currenthp",	Cmd_EntityHP, ADMIN_FLAG, "See Current HP");
+	RegAdminCmd("sm_subtracthp",Cmd_EntityHP, ADMIN_FLAG, "Subtract Current HP");
+
 
 	HookEvent("round_start", Event_Round, EventHookMode_PostNoCopy);
 
@@ -92,7 +99,16 @@ public void OnPluginStart()
 	smMaxes = CreateTrie();
 
 	hCookie = RegClientCookie("bhud_cookie", "Status of BossHud", CookieAccess_Private);
+	RegConsoleCmd("sm_bhud",	Cmd_ToggleHud, "Toggle BHud");
+
 	for(int i = 1; i <= MaxClients; i++) if(AreClientCookiesCached(i)) OnClientCookiesCached(i);
+}
+
+public void CVarChange_Show(ConVar cvar, char[] oldValue, char[] newValue)
+{
+	bShow[0] = cvar.BoolValue;
+
+	for(int i = 1; i <= MaxClients; i++) if(!IsClientInGame(i)) bShow[i] = bShow[0];
 }
 
 public void CVarChange_Center(ConVar cvar, char[] oldValue, char[] newValue)
@@ -185,15 +201,18 @@ public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 
 public void OnClientDisconnect(int client)
 {
+	bShow[client] = bShow[0];
 	iEntRef[client] = 0;
 	if(hTimer[client]) delete hTimer[client];
 }
 
 public void OnClientCookiesCached(int client)
 {
+	if(!client || IsFakeClient(client) || !IsHasAccess(client)) return;
+
 	char buffer[4];
 	GetClientCookie(client, hCookie, buffer, sizeof(buffer));
-	bShow[client] = buffer[0] != '0';
+	bShow[client] = !buffer[0] ? bShow[0] : buffer[0] == '1';
 }
 
 public void OnEntityCreated(int entity, const char[] classname)
@@ -329,6 +348,8 @@ public Action Cmd_EntityHP(int client, int argc)
 
 public Action Cmd_ToggleHud(int client, int argc)
 {
+	if(!client) return Plugin_Handled;
+
 	if(IsHasAccess(client))
 	{
 		bShow[client] = !bShow[client];
@@ -336,6 +357,7 @@ public Action Cmd_ToggleHud(int client, int argc)
 		SetClientCookie(client, hCookie, bShow[client] ? "1" : "0");
 	}
 	else PrintToChat(client, "[SM] You don't have access to this command.");
+
 	return Plugin_Handled;
 }
 
