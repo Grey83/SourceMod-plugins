@@ -1,3 +1,9 @@
+/*	The most current version of the plugin files avaiable there:
+ *	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/sm_revival.sp
+ *	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/revival.inc
+ *	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/sm_revival%20translations.zip
+ */
+
 #pragma semicolon 1
 #pragma newdecls required
 
@@ -8,19 +14,19 @@
 #include <sdktools_sound>
 #include <sdktools_stringtables>
 #include <sdktools_tempents>
-#if SOURCEMOD_V_MINOR >= 9
-	#include <sdktools_variant_t>
-#endif
+#tryinclude <sdktools_variant_t>
 #include <usermessages>
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.4_b07.10.2021"
+	#define PL_VER	"1.1.4_10.10.2021"
 #else
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.4_b07.10.2021";
+	PL_VER[]	= "1.1.4_10.10.2021";
 #endif
+
+#define IS_CORE true	// set to false if not needed modules support
 
 static const int
 	COLOR[]		= {0xff3f1f, 0x1f3fff, 0x00bf00, 0x00bf00},	// marks (T, CT, Any) & HUD
@@ -31,6 +37,8 @@ static const float
 	MARK_SIZE	= 0.3,	// размер меток
 	UPDATE		= 5.0;	// минимальная частота обновления информации HUD и KeyHint - раз в 5 секунд
 static const char
+//	dissolve type for bodies: 0 - Energy, 1 - Heavy electrical, 2 - Light electrical, 3 - Core effect
+	DISSOLVE[]	= "3",	// empty brackets (without number, like this: "") - disables the dissolve effect
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS OB
 	MARK_V34[]	= "sprites/glow",		//		-//-		  CSSv34
 	KEY_NAME[][]= {"Ctrl", "E", "Shift"},
@@ -84,6 +92,16 @@ enum
 	RI_Percents
 };
 
+Handle
+#if IS_CORE
+	hFwd_PlayerReviving,
+#endif
+	hCookies,
+	hHUD,
+	hTimer,
+	hTimerClear[MAXPLAYERS+1];
+Menu
+	hMenu;
 bool
 	bEnable,
 	bTip,
@@ -99,13 +117,13 @@ bool
 	bReset,
 	bTogether,
 	bLastMan,
-	bDuel;
-float
-	fRadius,
-	fNoDmgTime,
-	fPosX,
-	fPosY,
-	fDuckTime[MAXPLAYERS+1];
+	bDuel,
+	bLate,
+	bAllowed = true,
+	bProto,
+	bProtected[MAXPLAYERS+1],
+	bDefault[3],
+	bBlocked;
 int
 	iKey[MAXPLAYERS+1],
 	iHUD[MAXPLAYERS+1],
@@ -121,33 +139,12 @@ int
 	iRIP,
 	iColor[4],
 	iBalance,
-	iFeed;
-char
-	sCvarPath[PLATFORM_MAX_PATH],
-	sSound[PLATFORM_MAX_PATH],
-	sMark[3][PLATFORM_MAX_PATH],
-	sKeyHintText[MAXPLAYERS+1][1024];
-
-Handle
-	hFwd_PlayerReviving,
-	hCookies,
-	hHUD,
-	hTimer,
-	hTimerClear[MAXPLAYERS+1];
-Menu
-	hMenu;
-bool
-	bLate,
-	bAllowed = true,
-	bProto,
-	bProtected[MAXPLAYERS+1],
-	bDefault[3],
-	bBlocked;
-int
+	iFeed,
 	iEngine,
 	iOffsetGroup,
 	hBeam = -1,
 	hHalo = -1,
+	iDissolver,
 	iMarkRef[MAXPLAYERS+1] = {-1, ...},
 	iUses[MAXPLAYERS+1],
 	iRevived[MAXPLAYERS+1],
@@ -159,9 +156,19 @@ int
 	iDiff,
 	iPercents[MAXPLAYERS+1];
 float
+	fRadius,
+	fNoDmgTime,
+	fPosX,
+	fPosY,
+	fDuckTime[MAXPLAYERS+1],
 	fDeathPos[MAXPLAYERS+1][3],
 	fDeathAng[MAXPLAYERS+1][3],
 	fProgress[MAXPLAYERS+1][MAXPLAYERS+1];
+char
+	sCvarPath[PLATFORM_MAX_PATH],
+	sSound[PLATFORM_MAX_PATH],
+	sMark[3][PLATFORM_MAX_PATH],
+	sKeyHintText[MAXPLAYERS+1][1024];
 
 public Plugin myinfo =
 {
@@ -170,21 +177,39 @@ public Plugin myinfo =
 	description	= "Press and hold +USE above death place to respawn player",
 	version		= PL_VER,
 	url			= "https://steamcommunity.com/groups/grey83ds"
-//	https://github.com/Grey83/SourceMod-plugins/blob/master/SM/scripting/sm_revival.sp
-};
+}
 
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
+	switch(GetEngineVersion())
+	{
+		case Engine_CSGO:
+			iEngine = E_CSGO;
+		case Engine_CSS:
+			iEngine = E_CSS;
+		case Engine_SourceSDK2006:
+			iEngine = E_Old;
+		default:
+		{
+			FormatEx(error, err_max, "Plugin for CS:S and CS:GO only!");
+			return APLRes_Failure;
+		}
+	}
+
+#if IS_CORE
 	CreateNative("Revival_GetPlayerInfo", Native_GetPlayerInfo);
 	CreateNative("Revival_SetPlayerInfo", Native_SetPlayerInfo);
 
-	hFwd_PlayerReviving	= CreateGlobalForward("Revival_OnPlayerReviving", ET_Ignore, Param_Cell, Param_Cell, Param_CellByRef, Param_CellByRef, Param_CellByRef);
+	hFwd_PlayerReviving = CreateGlobalForward("Revival_OnPlayerReviving", ET_Ignore, Param_Cell, Param_Cell, Param_CellByRef, Param_CellByRef, Param_CellByRef);
 
 	RegPluginLibrary("revival");
+#endif
+
 	bLate = late;
 	return APLRes_Success;
 }
 
+#if IS_CORE
 public int Native_GetPlayerInfo(Handle plugin, int numParams)
 {
 	int client = GetNativeCell(1);
@@ -251,20 +276,10 @@ public int Native_SetPlayerInfo(Handle plugin, int numParams)
 
 	return 0;
 }
+#endif
 
 public void OnPluginStart()
 {
-	switch(GetEngineVersion())
-	{
-		case Engine_CSGO:
-			iEngine = E_CSGO;
-		case Engine_CSS:
-			iEngine = E_CSS;
-		case Engine_SourceSDK2006:
-			iEngine = E_Old;
-		default: SetFailState("Plugin for CS:S and CS:GO only!");
-	}
-
 	bProto = GetFeatureStatus(FeatureType_Native, "GetUserMessageType") == FeatureStatus_Available && GetUserMessageType() == UM_Protobuf;
 
 	if(iEngine != E_Old) hHUD = CreateHudSynchronizer();
@@ -274,43 +289,43 @@ public void OnPluginStart()
 	CreateConVar("sm_revival_version", PL_VER, PL_NAME, FCVAR_SPONLY|FCVAR_DONTRECORD|FCVAR_NOTIFY);
 
 	ConVar cvar;
-	cvar = CreateConVar("sm_revival_enabled", "1", "Enable/disable plugin", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_enabled", "1", "Enable/disable plugin", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Enable);
 	bEnable = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_tip", "1", "Enable/disable key tip at the beginning of the round", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_tip", "1", "Enable/disable key tip at the beginning of the round", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Tip);
 	bTip = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_msg", "1", "Enable/disable chat messages", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_msg", "1", "Enable/disable chat messages", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Msg);
 	bMsg = cvar.BoolValue;
 
 	cvar = CreateConVar("sm_revival_key", "1", "Default key for reviving (0 - 'duck', 1 - 'use', 2 - 'walk', 3 - no key needed)", _, true, _, true, 3.0);
 	cvar.AddChangeHook(CVarChanged_Key);
-	iKey[0] = cvar.IntValue;
+	CVarChanged_Key(cvar, "", "");
 
-	cvar = CreateConVar("sm_revival_pos", "1", "Spawn player at: 0 - position of reviver, 1 - his death position", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_pos", "1", "Spawn player at: 0 - position of reviver, 1 - his death position", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Pos);
 	bPos = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_clean", "2", "Remove body x sec after the death (-1 - don't remove)", FCVAR_NOTIFY, true, -1.0);
+	cvar = CreateConVar("sm_revival_clean", "2", "Remove body x sec after the death (-1 - don't remove)", _, true, -1.0);
 	cvar.AddChangeHook(CVarChanged_Clean);
 	iClean = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_teamchange", "1", "Can a player be revived after a team change", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_teamchange", "1", "Can a player be revived after a team change", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Team);
 	bTeam = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_enemy", "0", "Can a player revive the enemy (the revived player will change the team)", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_enemy", "0", "Can a player revive the enemy (the revived player will change the team)", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Enemy);
 	bEnemy = cvar.BoolValue;
 
 	cvar = CreateConVar("sm_revival_bar", "1", "Enable/disable progressbar for reviving", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Bar);
-	bBar[0] = cvar.BoolValue;
+	CVarChanged_Bar(cvar, "", "");
 
-	cvar = CreateConVar("sm_revival_percent", "1", "Enable/disable save the percentage of reviving", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_percent", "1", "Enable/disable save the percentage of reviving", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Percent);
 	bPercent = cvar.BoolValue;
 
@@ -318,27 +333,27 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Effect);
 	bEffect = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_radius", "200.0", "Radius to respawn death player", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_radius", "200.0", "Radius to respawn death player", _, true);
 	cvar.AddChangeHook(CVarChanged_Radius);
 	fRadius = cvar.FloatValue;
 
-	cvar = CreateConVar("sm_revival_time", "0", "The time after the death of the player, during which the revive is possible", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_time", "0", "The time after the death of the player, during which the revive is possible", _, true);
 	cvar.AddChangeHook(CVarChanged_Time);
 	iTime = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_countdown", "3", "Time for respawn in seconds", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_countdown", "3", "Time for respawn in seconds", _, true);
 	cvar.AddChangeHook(CVarChanged_CD);
 	iCD = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_times", "0", "How many times can a player revive other players during the round (0 - unlimited)", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_times", "0", "How many times can a player revive other players during the round (0 - unlimited)", _, true);
 	cvar.AddChangeHook(CVarChanged_Times);
 	iTimes = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_reset", "0", "Reset counter of revived (for cvar 'sm_revival_times') at every: 0 - round, 1 - spawn", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_reset", "0", "Reset counter of revived (for cvar 'sm_revival_times') at every: 0 - round, 1 - spawn", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Reset);
 	bReset = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_risings", "0", "How many times can a player will revived by other players during the round (0 - unlimited)", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_risings", "0", "How many times can a player will revived by other players during the round (0 - unlimited)", _, true);
 	cvar.AddChangeHook(CVarChanged_Risings);
 	iRevived[0] = cvar.IntValue;
 
@@ -346,27 +361,27 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_NoBlockTime);
 	iNoBlockTime = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others (negative - add HP to reviver)", FCVAR_NOTIFY, true, -100.0, true, 100.0);
+	cvar = CreateConVar("sm_revival_health_cost", "25", "Need's health to respawn others (negative - add HP to reviver)", _, true, -100.0, true, 100.0);
 	cvar.AddChangeHook(CVarChanged_HPCost);
 	iHPCost = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_maxhealth", "100", "The maximum amount of health that a reviver can receive for reviving players (0 - disable limit)", FCVAR_NOTIFY, true, _, true, 10000.0);
+	cvar = CreateConVar("sm_revival_maxhealth", "100", "The maximum amount of health that a reviver can receive for reviving players (0 - disable limit)", _, true, _, true, 10000.0);
 	cvar.AddChangeHook(CVarChanged_HPMax);
 	iHPMax = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_death", "1", "Can a player revive others if he have less HP than needed for reviving", FCVAR_NOTIFY, true, _, true, 1.0);
+	cvar = CreateConVar("sm_revival_death", "1", "Can a player revive others if he have less HP than needed for reviving", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Death);
 	bDeath = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_health", "100", "How many HP will get revived player", FCVAR_NOTIFY, true, 25.0);
+	cvar = CreateConVar("sm_revival_health", "100", "How many HP will get revived player", _, true, 25.0);
 	cvar.AddChangeHook(CVarChanged_HP);
 	iHP = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_frag", "1", "Give x frags to the player for revived teammate", FCVAR_NOTIFY, true);
+	cvar = CreateConVar("sm_revival_frag", "1", "Give x frags to the player for revived teammate", _, true);
 	cvar.AddChangeHook(CVarChanged_Frag);
 	iFrag = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_rip", "0", "Disallow the revival of the players killed: 1 - in the head, 2 - with a knife.", FCVAR_NOTIFY, true, _, true, 3.0);
+	cvar = CreateConVar("sm_revival_rip", "0", "Disallow the revival of the players killed: 1 - in the head, 2 - with a knife.", _, true, _, true, 3.0);
 	cvar.AddChangeHook(CVarChanged_RIP);
 	iRIP = cvar.IntValue;
 
@@ -416,11 +431,11 @@ public void OnPluginStart()
 
 	if(iEngine != E_Old)
 	{
-		cvar = CreateConVar("sm_revival_hud_x", "0.99", "HUD info position X (0.0 - 1.0 left to right or -1 for center)", _, true, -2.0, true, 1.0);
+		cvar = CreateConVar("sm_revival_hud_x", "0.99", "HUD info position X (0.0 - 1.0 left to right or -1.0 for center)", _, true, -2.0, true, 1.0);
 		cvar.AddChangeHook(CVarChanged_HUDPosX);
 		fPosX = cvar.FloatValue;
 
-		cvar = CreateConVar("sm_revival_hud_y", "0.75", "HUD info position Y (0.0 - 1.0 top to bottom or -1 for center)", _, true, -2.0, true, 1.0);
+		cvar = CreateConVar("sm_revival_hud_y", "0.75", "HUD info position Y (0.0 - 1.0 top to bottom or -1.0 for center)", _, true, -2.0, true, 1.0);
 		cvar.AddChangeHook(CVarChanged_HUDPosY);
 		fPosY = cvar.FloatValue;
 
@@ -430,7 +445,7 @@ public void OnPluginStart()
 
 		cvar = CreateConVar("sm_revival_hud_mode", "2", "Show additional info in the: 0 - chat only, 1 - HUD, 2 - KeyHint (not for CS:S v34)", _, true, _, true, 2.0);
 		cvar.AddChangeHook(CVarChanged_HUDMode);
-		iHUD[0] = cvar.IntValue;
+		CVarChanged_HUDMode(cvar, "", "");
 	}
 
 	cvar = CreateConVar("sm_revival_together", "1", "Can more than 1 alive player try to revive a player at the same time (0 - 1 reviver per 1 dead player)", _, true, _, true, 1.0);
@@ -467,18 +482,9 @@ public void OnPluginStart()
 
 	if(!bLate) return;
 
-	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i))
-	{
-		if(!AreClientCookiesCached(i))
-		{
-			iKey[i] = iKey[0];
-			bBar[i] = bBar[0];
-			iHUD[i] = iHUD[0];
-		}
-		else ReadClientSettings(i);
-	}
+	CreateDissolver();
+	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i)) ReadClientSettings(i);
 	CountAlive();
-	bLate = false;
 }
 
 public void OnPluginEnd()
@@ -506,6 +512,7 @@ public void CVarChanged_Msg(ConVar cvar, const char[] oldVal, const char[] newVa
 public void CVarChanged_Key(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	iKey[0] = cvar.IntValue;
+	for(int i = 1; i <= MaxClients; i++) if(!IsClientInGame(i) || IsFakeClient(i)) iKey[i] = iKey[0];
 }
 
 public void CVarChanged_Pos(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -533,6 +540,7 @@ public void CVarChanged_Enemy(ConVar cvar, const char[] oldVal, const char[] new
 public void CVarChanged_Bar(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	bBar[0] = cvar.BoolValue;
+	for(int i = 1; i <= MaxClients; i++) if(!IsClientInGame(i) || IsFakeClient(i)) bBar[i] = bBar[0];
 }
 
 public void CVarChanged_Percent(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -754,6 +762,7 @@ public void CVarChanged_HUDColor(ConVar cvar, const char[] oldValue, const char[
 public void CVarChanged_HUDMode(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
 	iHUD[0] = cvar.IntValue;
+	for(int i = 1; i <= MaxClients; i++) if(!IsClientInGame(i) || IsFakeClient(i)) iHUD[i] = iHUD[0];
 }
 
 public void CVarChanged_Together(ConVar cvar, const char[] oldValue, const char[] newValue)
@@ -953,7 +962,7 @@ stock void SendMenu(int client)
 
 public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 {
-	static char buffer[128];
+	static char txt[128];
 	SetGlobalTransTarget(client);
 	switch(action)
 	{
@@ -963,37 +972,29 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 		{
 			switch(param)
 			{
-				case 0: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuKeyDuck", iKey[client] == 0 ? "☑" : "");
-				case 1: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuKeyUse", iKey[client] == 1 ? "☑" : "");
-				case 2: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuKeySpeed", iKey[client] == 2 ? "☑" : "");
-				case 3: FormatEx(buffer, sizeof(buffer), "%t %s\n \n  %t:", "MenuKeyNone", iKey[client] == 3 ? "☑" : "", "MenuInfoHint");
-				case 4: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuInfoNone", iHUD[client] == 0 ? "☑" : "");
-				case 5: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuInfoHUD", iHUD[client] == 1 ? "☑" : "");
-				case 6: FormatEx(buffer, sizeof(buffer), "%t %s\n ", "MenuInfoKeyHint", iHUD[client] == 2 ? "☑" : "");
-				case 7: FormatEx(buffer, sizeof(buffer), "%t %s", "MenuProgressbar", bBar[client] ? "☑" : "☐");
+				case 0: FormatEx(txt, sizeof(txt), "%t %s", "MenuKeyDuck", iKey[client] == 0 ? "☑" : "");
+				case 1: FormatEx(txt, sizeof(txt), "%t %s", "MenuKeyUse", iKey[client] == 1 ? "☑" : "");
+				case 2: FormatEx(txt, sizeof(txt), "%t %s", "MenuKeySpeed", iKey[client] == 2 ? "☑" : "");
+				case 3: FormatEx(txt, sizeof(txt), "%t %s\n \n  %t:", "MenuKeyNone", iKey[client] == 3 ? "☑" : "", "MenuInfoHint");
+				case 4: FormatEx(txt, sizeof(txt), "%t %s", "MenuInfoNone", iHUD[client] == 0 ? "☑" : "");
+				case 5: FormatEx(txt, sizeof(txt), "%t %s", "MenuInfoHUD", iHUD[client] == 1 ? "☑" : "");
+				case 6: FormatEx(txt, sizeof(txt), "%t %s\n ", "MenuInfoKeyHint", iHUD[client] == 2 ? "☑" : "");
+				case 7: FormatEx(txt, sizeof(txt), "%t %s", "MenuProgressbar", bBar[client] ? "☑" : "☐");
 			}
-			return RedrawMenuItem(buffer);
+			return RedrawMenuItem(txt);
 		}
 		case MenuAction_DrawItem:
 			return param < 4 && iKey[client] == param || param > 3 && iHUD[client] == (param - 4) ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT;
 		case MenuAction_Select:
 		{
-			int val;
 			if(param == 7)
-			{
 				bBar[client] = !bBar[client];
-			}
 			else if(param < 4)
-			{
 				iKey[client] = param;
-			}
-			else
-			{
-				iHUD[client] = param - 4;
-			}
-			val = iKey[client] | view_as<int>(bBar[client]) << 3 | (iHUD[client] << 7);
-			FormatEx(buffer, sizeof(buffer), "0x%04x", val);
-			SetClientCookie(client, hCookies, buffer);
+			else iHUD[client] = param - 4;
+
+			FormatEx(txt, sizeof(txt), "0x%02x", ((iHUD[client]<<4) | (view_as<int>(bBar[client])<<3) | iKey[client]));
+			SetClientCookie(client, hCookies, txt);
 
 			SendMenu(client);
 		}
@@ -1009,18 +1010,17 @@ public void OnClientCookiesCached(int client)
 
 stock void ReadClientSettings(int client)
 {
-	static char buffer[4];
+	static char buffer[8];
 	GetClientCookie(client, hCookies, buffer, sizeof(buffer));
 	if(buffer[0] != '0' || buffer[1] != 'x' || strlen(buffer) != 4) return;
 
 	int val = StringToInt(buffer, 0x10);
 
-	iKey[client] = val & 7;	// 0000 0111
-	if(iKey[client] > 3) iKey[client] = iKey[0];
+	iKey[client] = val & 0x03;
 
-	bBar[client] = !!(val & 8);	// 0000 1000
+	bBar[client] = !!(val & 0x08);
 
-	iHUD[client] = val >> 7;
+	iHUD[client] = (val & 0x30) >> 4;
 	if(iHUD[client] > 2) iHUD[client] = iHUD[0];
 }
 
@@ -1034,6 +1034,9 @@ public void OnClientDisconnect(int client)
 	iTeam[client] = CS_TEAM_NONE;
 	bProtected[client] = false;
 	for(int i = 1; i <= MaxClients; i++) if(i != client && iTarget[i] == client) iTarget[i] = 0;
+	iKey[client] = iKey[0];
+	bBar[client] = bBar[0];
+	iHUD[client] = iHUD[0];
 
 }
 
@@ -1076,15 +1079,23 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 	if(iTime) CreateTimer(iTime+0.0, Timer_DisableReviving, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 
 	if(iClean < 0) return;
-	static int iOffsetRagdoll = -1;
-	if((iOffsetRagdoll != -1 || (iOffsetRagdoll = FindSendPropInfo("CCSPlayer", "m_hRagdoll")) != -1)
-	&& (client = GetEntDataEnt2(client, iOffsetRagdoll)) != -1 && IsValidEntity(client))
+	static int offset = -1;
+	if((offset != -1 || (offset = FindSendPropInfo("CCSPlayer", "m_hRagdoll")) != -1)
+	&& (client = GetEntDataEnt2(client, offset)) != -1 && IsValidEntity(client))
 		CreateTimer(iClean+0.0, Timer_RemoveBody, EntIndexToEntRef(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
 public Action Timer_RemoveBody(Handle timer, any ent)
 {
-	if((ent = EntRefToEntIndex(ent)) != -1) AcceptEntityInput(ent, "Kill");
+	if((ent = EntRefToEntIndex(ent)) != -1)
+	{
+		if(DISSOLVE[0] && iDissolver != -1 && EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE)
+		{
+			DispatchKeyValue(ent, "targetname", "dissolved_ragdoll");
+			AcceptEntityInput(iDissolver, "Dissolve");
+		}
+		else AcceptEntityInput(ent, "Kill");
+	}
 }
 
 public Action Timer_DisableReviving(Handle timer, any client)
@@ -1120,7 +1131,7 @@ stock void CountAlive()
 			ct++;
 		else t++;
 	}
-	iDiff = t - ct;
+	iDiff = ct - t;
 
 	bBlocked = bLastMan && (t == 1 || ct == 1) || bDuel && t == 1 && ct == 1;
 }
@@ -1139,11 +1150,31 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 			else PrintToChatClr(i, "%t%t", "ChatTag", "NoKeyTip");
 		}
 	}
+
 	for(i = 1; i <= MaxClients; i++)
 	{
 		iRevives[i][0] = iRevives[i][1] = iRevived[i] = iTarget[i] = sKeyHintText[i][0] = 0;
 		bProtected[i] = false;
 	}
+
+	CreateDissolver();
+}
+
+stock void CreateDissolver()
+{
+	int entity;
+	if(DISSOLVE[0] && (entity = CreateEntityByName("env_entity_dissolver")) != -1)
+	{
+		DispatchKeyValue(entity, "target", "dissolved_ragdoll");
+		DispatchKeyValue(entity, "dissolvetype", DISSOLVE);
+		DispatchKeyValue(entity, "magnitude", "50");
+		iDissolver = EntIndexToEntRef(entity);
+	}
+}
+
+public void OnEntityDestroyed(int entity)
+{
+	if(iDissolver != -1 && entity == iDissolver) iDissolver = -1;
 }
 
 public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
@@ -1255,12 +1286,12 @@ stock void SendWarnNotEnough(int client, bool &val)
 
 public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3], float angles[3], int &weapon)
 {
-	static bool reset[MAXPLAYERS+1], cant, prev[MAXPLAYERS+1], warned[MAXPLAYERS+1];
+	static bool change, reset[MAXPLAYERS+1], cant, prev[MAXPLAYERS+1], warned[MAXPLAYERS+1];
 	static int old_target[MAXPLAYERS+1], diff, target[MAXPLAYERS+1], old_buttons[MAXPLAYERS+1], iOffsetVel_0 = -1, iOffsetVel_1 = -1, iOffsetVel_2 = -1, health, perc;
 	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1], pos[3];
 	static char name[MAX_NAME_LENGTH];
 
-	cant = false;
+	change = false;
 	time = GetGameTime();
 	if(fDuckTime[client] > time)
 	{
@@ -1268,8 +1299,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		else
 		{
 			buttons |= IN_DUCK;
-			cant = true;
-			if(!bProtected[client]) return Plugin_Changed;
+			change = true;
 		}
 	}
 
@@ -1278,23 +1308,23 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		if(buttons & IN_ATTACK)
 		{
 			buttons &= ~IN_ATTACK;
-			cant = true;
+			change = true;
 		}
 		if(buttons & IN_ATTACK2)
 		{
 			buttons &= ~IN_ATTACK2;
-			cant = true;
+			change = true;
 		}
 /*		if(buttons & IN_FORWARD)
 		{
 			buttons &= ~IN_FORWARD;
-			cant = true;
+			change = true;
 		}
-*/		return cant ? Plugin_Changed : Plugin_Continue;
+*/		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
-	if(!bEnable || !bAllowed || !bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
-		return Plugin_Continue;
+	if(!bEnable || !bAllowed || bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
+		return change ? Plugin_Changed : Plugin_Continue;
 
 	if(iBalance != -1 && iTeam[client] > CS_TEAM_SPECTATOR && (iKey[client] == 3 || buttons & KEY_VAL[iKey[client]])
 	&& ((iTeam[client] == CS_TEAM_CT ? iDiff : -iDiff) >= iBalance))
@@ -1319,7 +1349,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			warned[client] = true;
 		}
 		old_buttons[client] = buttons;
-		return Plugin_Continue;
+		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
 	if(!reset[client] && (!IsPlayerAlive(client) || GetClientTeam(client) < CS_TEAM_T))
@@ -1332,7 +1362,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		UpdateHUD(client);
 		SendProgressBar(client, old_target[client]);
 		if(old_target[client]) old_target[client] = 0;
-		return Plugin_Continue;
+		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
 	cant = iHPCost && (diff = (health = GetClientHealth(client)) - iHPCost) < 1 && !bDeath;
@@ -1348,7 +1378,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		}
 		SendWarnNotEnough(client, prev[client]);
 		old_buttons[client] = buttons;
-		return Plugin_Continue;
+		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
 	if(old_target[client] && (!IsClientInGame(old_target[client]) || IsPlayerAlive(old_target[client]) || cant))
@@ -1361,7 +1391,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		if(cant)
 		{
 			SendWarnNotEnough(client, prev[client]);
-			return Plugin_Continue;
+			return change ? Plugin_Changed : Plugin_Continue;
 		}
 	}
 	prev[client] = cant;
@@ -1445,8 +1475,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 #endif
 			if(perc >= 100)
 			{
-				buttons |= IN_DUCK;
-				fDuckTime[target[client]] = 2 + time;
+				fDuckTime[target[client]] = 1 + time;
 				InitRespawn(client, target[client], health, health - diff);
 			}
 			else if(iPercents[client] != perc)
@@ -1486,7 +1515,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		old_target[client] = 0;
 	}
 	old_buttons[client] = buttons;
-	return Plugin_Continue;
+	return change ? Plugin_Changed : Plugin_Continue;
 }
 
 stock void SaveStats(int client, int val = 100, bool success = true)
@@ -1514,22 +1543,25 @@ stock void CreateMark(int client)
 	if((ent = CreateEntityByName("env_sprite")) == -1) return;
 
 	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
+	DispatchKeyValueVector(ent, "origin", fDeathPos[client]);
 	DispatchKeyValue(ent, "model", sMark[type]);
 	DispatchKeyValue(ent, "classname", "death_mark");
 	DispatchKeyValue(ent, "spawnflags", "1");
 	DispatchKeyValueFloat(ent, "scale", MARK_SIZE);
 	DispatchKeyValue(ent, "rendermode", "5");
-	DispatchSpawn(ent);
+	if(!DispatchSpawn(ent))
+	{
+		LogError("Can't spawn entity 'env_sprite' (%i)!", ent);
+		return;
+	}
 
 	iMarkRef[client] = EntIndexToEntRef(ent);
-	SetMarkColor(client);
-	TeleportEntity(ent, fDeathPos[client], NULL_VECTOR, NULL_VECTOR);
+	SetMarkColor(client, type);
 }
 
-stock void SetMarkColor(const int client)
+stock void SetMarkColor(const int client, int type = -1)
 {
-	static int type;
-	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
+	if(type == -1) type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
 
 	SetVariantInt(((iColor[type] & 0xFF0000) >> 16));
 	AcceptEntityInput(iMarkRef[client], "ColorRedValue");
@@ -1613,6 +1645,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	SendProgressBar(client, target);
 
 	int frags = iFrag, hp = iHP;
+#if IS_CORE
 	Call_StartForward(hFwd_PlayerReviving);
 	Call_PushCell(client);
 	Call_PushCell(target);
@@ -1622,6 +1655,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	Call_PushCellRef(hp);
 	if(hp < 1) hp = 1;
 	Call_Finish();
+#endif
 
 	int buffer;
 	if((buffer = GetClientTeam(client)) != iDeathTeam[target] && bEnemy) CS_SwitchTeam(target, buffer);
