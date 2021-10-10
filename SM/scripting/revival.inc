@@ -16,22 +16,22 @@ enum
 /**
  * Getting current player information by selected type
  *
- * @param сlient	Client index
+ * @param client	Client index
  * @param type		Information type: RI_*
  * @return			Player information by selected type (-1 for wrong type)
  * @error			Invalid client index, client not connected, fake client or invalid information type.
  */
-native int Revival_GetPlayerInfo(int сlient, int type);
+native int Revival_GetPlayerInfo(int client, int type);
 
 /**
  * Setting current player values of selected type
  *
- * @param сlient	Client index
+ * @param client	Client index
  * @param type		Information type: RI_*
  * @param value		Value of choosed type
  * @error			Invalid client index, client not connected, fake client, invalid information type or invalid value.
  */
-native void Revival_SetPlayerInfo(int сlient, int type, int value);
+native void Revival_SetPlayerInfo(int client, int type, int value);
 
 /**
  * Called when a client changed status.
