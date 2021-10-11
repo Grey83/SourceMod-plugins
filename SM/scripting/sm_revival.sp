@@ -1476,7 +1476,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			if(perc >= 100)
 			{
 				fDuckTime[target[client]] = 1 + time;
-				InitRespawn(client, target[client], health, health - diff);
+				InitRespawn(client, target[client], health, diff - health);
 			}
 			else if(iPercents[client] != perc)
 			{
@@ -1651,7 +1651,6 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	Call_PushCell(target);
 	Call_PushCellRef(frags);
 	Call_PushCellRef(diff);
-	if(diff < 0) diff = 0;
 	Call_PushCellRef(hp);
 	if(hp < 1) hp = 1;
 	Call_Finish();
