@@ -19,11 +19,11 @@
 
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.4_10.10.2021"
+	#define PL_VER	"1.1.5_16.10.2021"
 #else
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.4_10.10.2021";
+	PL_VER[]	= "1.1.5_16.10.2021";
 #endif
 
 #define IS_CORE true	// set to false if not needed modules support
@@ -38,7 +38,6 @@ static const float
 	UPDATE		= 5.0;	// минимальная частота обновления информации HUD и KeyHint - раз в 5 секунд
 static const char
 //	dissolve type for bodies: 0 - Energy, 1 - Heavy electrical, 2 - Light electrical, 3 - Core effect
-	DISSOLVE[]	= "3",	// empty brackets (without number, like this: "") - disables the dissolve effect
 	MARK_CSS[]	= "hud/scoreboard_dead",// Default sprite for CSGO & CSS OB
 	MARK_V34[]	= "sprites/glow",		//		-//-		  CSSv34
 	KEY_NAME[][]= {"Ctrl", "E", "Shift"},
@@ -108,11 +107,13 @@ bool
 	bMsg,
 	bPos,
 	bTeam,
+	bNoEnd,
 	bEnemy,
 	bBar[MAXPLAYERS+1],
 	bPercent,
 	bEffect,
 	bDeath,
+	bCrouch,
 	bSprites,
 	bReset,
 	bTogether,
@@ -128,6 +129,7 @@ int
 	iKey[MAXPLAYERS+1],
 	iHUD[MAXPLAYERS+1],
 	iClean,
+	iDissolve,
 	iTime,
 	iCD,
 	iTimes,
@@ -160,7 +162,6 @@ float
 	fNoDmgTime,
 	fPosX,
 	fPosY,
-	fDuckTime[MAXPLAYERS+1],
 	fDeathPos[MAXPLAYERS+1][3],
 	fDeathAng[MAXPLAYERS+1][3],
 	fProgress[MAXPLAYERS+1][MAXPLAYERS+1];
@@ -313,9 +314,17 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Clean);
 	iClean = cvar.IntValue;
 
+	cvar = CreateConVar("sm_revival_dissolve", "3", "Dissolve effect when removing ragdolls:\n -1 - disable effect, 0 - Energy, 1 - Heavy electrical, 2 - Light electrical, 3 - Core effect", _, true, -1.0, true, 3.0);
+	cvar.AddChangeHook(CVarChanged_Dissolve);
+	iDissolve = cvar.IntValue;
+
 	cvar = CreateConVar("sm_revival_teamchange", "1", "Can a player be revived after a team change", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Team);
 	bTeam = cvar.BoolValue;
+
+	cvar = CreateConVar("sm_revival_no_end", "1", "Can a players be revived after a round end", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_NoEnd);
+	bNoEnd = cvar.BoolValue;
 
 	cvar = CreateConVar("sm_revival_enemy", "0", "Can a player revive the enemy (the revived player will change the team)", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Enemy);
@@ -396,6 +405,10 @@ public void OnPluginStart()
 	cvar = CreateConVar("sm_revival_nodmg_time", "2.0", "No damage recive time after respawn (set at 0.0 if you have any spawn protect plugin)", _, true, _, true, 5.0);
 	cvar.AddChangeHook(CVarChanged_NoDmgTime);
 	fNoDmgTime = cvar.FloatValue;
+
+	cvar = CreateConVar("sm_revival_crouch", "1", "Crouch a revived player for a split second to avoid getting stuck in a space with a low height.", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Crouch);
+	bCrouch = cvar.BoolValue;
 
 	cvar = CreateConVar("sm_revival_color_t", "ff3f1f", "T death mark color. Set by HEX (RGB or RRGGBB, values 0 - F or 00 - FF, resp.). Wrong color code = red", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_ColorT);
@@ -525,9 +538,20 @@ public void CVarChanged_Clean(ConVar cvar, const char[] oldVal, const char[] new
 	iClean = cvar.IntValue;
 }
 
+public void CVarChanged_Dissolve(ConVar cvar, const char[] oldVal, const char[] newVal)
+{
+	iDissolve = cvar.IntValue;
+	CreateDissolver();
+}
+
 public void CVarChanged_Team(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	bTeam = cvar.BoolValue;
+}
+
+public void CVarChanged_NoEnd(ConVar cvar, const char[] oldVal, const char[] newVal)
+{
+	bNoEnd = cvar.BoolValue;
 }
 
 public void CVarChanged_Enemy(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -636,6 +660,11 @@ public void CVarChanged_Balance(ConVar cvar, const char[] oldValue, const char[]
 public void CVarChanged_NoDmgTime(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	fNoDmgTime = cvar.FloatValue;
+}
+
+public void CVarChanged_Crouch(ConVar cvar, const char[] oldVal, const char[] newVal)
+{
+	bCrouch = cvar.BoolValue;
 }
 
 public void CVarChanged_ColorT(ConVar cvar, const char[] oldValue, const char[] newValue)
@@ -876,6 +905,12 @@ stock void UpdateHUD(const int client, const bool set = true)
 
 	if(iHUD[client] == 2)
 	{
+		if(bProto)
+		{
+			PrintHintText(client, txt);
+			return;
+		}
+
 		if(sKeyHintText[client][0]) Format(txt, sizeof(txt), "%s\n\n%s", txt, sKeyHintText[client]);
 
 		Handle msg = StartMessageOne("KeyHintText", client, USERMSG_BLOCKHOOKS);
@@ -896,14 +931,10 @@ stock void UpdateHUD(const int client, const bool set = true)
 
 public Action HookKeyHintText(UserMsg msg_id, Handle msg, const int[] players, int playersNum, bool reliable, bool init)
 {
-	if(IsFakeClient(players[0]) || iHUD[players[0]] != 2) return Plugin_Continue;
+	if(bProto || IsFakeClient(players[0]) || iHUD[players[0]] != 2) return Plugin_Continue;
 
-	if(!bProto)
-	{
-		BfReadByte(msg);
-		BfReadString(msg, sKeyHintText[players[0]], sizeof(sKeyHintText[]));
-	}
-//	else PbReadString(msg, "hints", sKeyHintText[players[0]], sizeof(sKeyHintText[]));
+	BfReadByte(msg);
+	BfReadString(msg, sKeyHintText[players[0]], sizeof(sKeyHintText[]));
 	RequestFrame(RequestFrame_Callback, players[0]);
 
 	if(hTimerClear[players[0]]) delete hTimerClear[players[0]];
@@ -1030,7 +1061,6 @@ public void OnClientDisconnect(int client)
 	CountAlive();
 	RemoveMark(client);
 	iUses[client] = iRevived[client] = iTarget[client] = iDeathTeam[client] = sKeyHintText[client][0] = 0;
-	fDuckTime[client] = 0.0;
 	iTeam[client] = CS_TEAM_NONE;
 	bProtected[client] = false;
 	for(int i = 1; i <= MaxClients; i++) if(i != client && iTarget[i] == client) iTarget[i] = 0;
@@ -1062,7 +1092,7 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 
 	sKeyHintText[client][0] = 0;
 	CountAlive();
-	if(!bEnable || !bAllowed || iRIP & 1 && event.GetBool("headshot") || iRevived[0] && iRevived[client] >= iRevived[0])
+	if(!bEnable || !bNoEnd && !bAllowed || iRIP & 1 && event.GetBool("headshot") || iRevived[0] && iRevived[client] >= iRevived[0])
 		return;
 
 	if(iRIP & 2)
@@ -1077,8 +1107,8 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 	CreateMark(client);
 
 	if(iTime) CreateTimer(iTime+0.0, Timer_DisableReviving, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
-
 	if(iClean < 0) return;
+
 	static int offset = -1;
 	if((offset != -1 || (offset = FindSendPropInfo("CCSPlayer", "m_hRagdoll")) != -1)
 	&& (client = GetEntDataEnt2(client, offset)) != -1 && IsValidEntity(client))
@@ -1089,7 +1119,7 @@ public Action Timer_RemoveBody(Handle timer, any ent)
 {
 	if((ent = EntRefToEntIndex(ent)) != -1)
 	{
-		if(DISSOLVE[0] && iDissolver != -1 && EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE)
+		if(iDissolver != -1 && EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE)
 		{
 			DispatchKeyValue(ent, "targetname", "dissolved_ragdoll");
 			AcceptEntityInput(iDissolver, "Dissolve");
@@ -1162,13 +1192,35 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 
 stock void CreateDissolver()
 {
-	int entity;
-	if(DISSOLVE[0] && (entity = CreateEntityByName("env_entity_dissolver")) != -1)
+	if(iDissolve == -1)
 	{
-		DispatchKeyValue(entity, "target", "dissolved_ragdoll");
-		DispatchKeyValue(entity, "dissolvetype", DISSOLVE);
-		DispatchKeyValue(entity, "magnitude", "50");
-		iDissolver = EntIndexToEntRef(entity);
+		if(EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE) AcceptEntityInput(iDissolver, "Kill");
+		iDissolver = -1;
+	}
+	else if(iDissolver == -1 || EntRefToEntIndex(iDissolver) == INVALID_ENT_REFERENCE)
+	{
+		int entity;
+		if((entity = CreateEntityByName("env_entity_dissolver")) != -1)
+		{
+			static char type[] = "0";
+			type[0] = '0' + iDissolve;
+			DispatchKeyValue(entity, "dissolvetype", type);
+			DispatchKeyValue(entity, "magnitude", "50");
+			DispatchKeyValue(entity, "target", "dissolved_ragdoll");
+			iDissolver = EntIndexToEntRef(entity);
+		}
+		else iDissolver = -1;
+	}
+	else
+	{
+		static int offset = -1;
+		if(offset != -1 || (offset = FindSendPropInfo("CEntityDissolve", "m_nDissolveType")) != -1)
+			SetEntData(EntRefToEntIndex(iDissolver), offset, iDissolve, 4, true);
+		else
+		{
+			LogError("Unable to find offset 'CEntityDissolve::m_nDissolveType'");
+			SetEntProp(EntRefToEntIndex(iDissolver), Prop_Data, "m_nDissolveType", iDissolve);
+		}
 	}
 }
 
@@ -1179,10 +1231,11 @@ public void OnEntityDestroyed(int entity)
 
 public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
 {
-	bAllowed = bBlocked = false;
+	bBlocked = false;
+	bAllowed = bNoEnd;
 	ShowTop();
 	ShowAntiTop();
-	for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i, true);
+	if(!bNoEnd) for(int i = 1; i <= MaxClients; i++) ResetRespawnData(i, true);
 	return Plugin_Continue;
 }
 
@@ -1288,14 +1341,14 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 {
 	static bool change, reset[MAXPLAYERS+1], cant, prev[MAXPLAYERS+1], warned[MAXPLAYERS+1];
 	static int old_target[MAXPLAYERS+1], diff, target[MAXPLAYERS+1], old_buttons[MAXPLAYERS+1], iOffsetVel_0 = -1, iOffsetVel_1 = -1, iOffsetVel_2 = -1, health, perc;
-	static float start[MAXPLAYERS+1], time, effect_time[MAXPLAYERS+1], pos[3];
+	static float start[MAXPLAYERS+1], time, crouch[MAXPLAYERS+1], effect_time[MAXPLAYERS+1], pos[3];
 	static char name[MAX_NAME_LENGTH];
 
 	change = false;
 	time = GetGameTime();
-	if(fDuckTime[client] > time)
+	if(bCrouch && crouch[client] > time)
 	{
-		if(buttons & IN_DUCK) fDuckTime[client] = 0.0;
+		if(buttons & IN_DUCK) crouch[client] = 0.0;
 		else
 		{
 			buttons |= IN_DUCK;
@@ -1323,7 +1376,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 */		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
-	if(!bEnable || !bAllowed || bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
+	if(!bEnable || !bNoEnd && !bAllowed || bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
 		return change ? Plugin_Changed : Plugin_Continue;
 
 	if(iBalance != -1 && iTeam[client] > CS_TEAM_SPECTATOR && (iKey[client] == 3 || buttons & KEY_VAL[iKey[client]])
@@ -1475,7 +1528,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 #endif
 			if(perc >= 100)
 			{
-				fDuckTime[target[client]] = 1 + time;
+				if(bCrouch) crouch[target[client]] = time + 0.2;
 				InitRespawn(client, target[client], health, diff - health);
 			}
 			else if(iPercents[client] != perc)
@@ -1573,7 +1626,6 @@ stock void SetMarkColor(const int client, int type = -1)
 
 stock void ResetRespawnData(int client, bool round = false)
 {
-	fDuckTime[client] = 0.0;
 	SendProgressBar(client);
 	fProgress[client] = NULL_PERCENT;
 	iDeathTeam[client] = iTarget[client] = iReviver[client] = iPercents[client] = 0;
@@ -1605,7 +1657,7 @@ stock int GetNearestTarget(int client)
 	if(!IsPlayerAlive(client)) return 0;
 
 	static int i, team, target;
-	static float pos[3], dist[MAXPLAYERS], min_dist;
+	static float pos[3], dist[MAXPLAYERS+1], min_dist;
 	if(!bEnemy) team = GetClientTeam(client);
 	GetClientAbsOrigin(client, pos);
 
@@ -1659,8 +1711,13 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	int buffer;
 	if((buffer = GetClientTeam(client)) != iDeathTeam[target] && bEnemy) CS_SwitchTeam(target, buffer);
 	CS_RespawnPlayer(target);
-	if(!bPos) GetClientAbsOrigin(client, fDeathPos[target]);
-	TeleportEntity(target, fDeathPos[target], fDeathAng[target], NULL_VECTOR);
+	if(!bPos)
+	{
+		GetClientAbsOrigin(client, fDeathPos[0]);
+		GetClientAbsAngles(client, fDeathAng[0]);
+		TeleportEntity(target, fDeathPos[0], fDeathAng[0], NULL_VECTOR);
+	}
+	else TeleportEntity(target, fDeathPos[target], fDeathAng[target], NULL_VECTOR);
 	SetEntityHealth(target, hp);
 	SetEntPropFloat(client, Prop_Send, "m_flFlashDuration", 0.0);
 
@@ -1692,7 +1749,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 		PrintToChatClr(target, "%t%t", "ChatTag", "YouRevived", client);
 	}
 
-	if(sSound[0]) EmitAmbientSound(sSound, fDeathPos[target]);
+	if(sSound[0]) EmitAmbientSound(sSound, fDeathPos[(bPos ? target : 0)]);
 
 	if(diff)
 	{
