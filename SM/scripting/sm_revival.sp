@@ -9,6 +9,7 @@
 
 #include <clientprefs>
 #include <cstrike>
+#include <sdkhooks>
 #include <sdktools_entinput>
 #include <sdktools_functions>
 #include <sdktools_sound>
@@ -17,13 +18,15 @@
 #tryinclude <sdktools_variant_t>
 #include <usermessages>
 
+#include <sdktools_gamerules>
+
 #if SOURCEMOD_V_MINOR > 10
 	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.5_16.10.2021"
+	#define PL_VER	"1.1.5_17.10.2021"
 #else
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.5_16.10.2021";
+	PL_VER[]	= "1.1.5_17.10.2021";
 #endif
 
 #define IS_CORE true	// set to false if not needed modules support
@@ -146,7 +149,7 @@ int
 	iOffsetGroup,
 	hBeam = -1,
 	hHalo = -1,
-	iDissolver,
+	iDissolver = -1,
 	iMarkRef[MAXPLAYERS+1] = {-1, ...},
 	iUses[MAXPLAYERS+1],
 	iRevived[MAXPLAYERS+1],
@@ -302,7 +305,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Msg);
 	bMsg = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_key", "1", "Default key for reviving (0 - 'duck', 1 - 'use', 2 - 'walk', 3 - no key needed)", _, true, _, true, 3.0);
+	cvar = CreateConVar("sm_revival_key", "3", "Default key for reviving (0 - 'duck', 1 - 'use', 2 - 'walk', 3 - no key needed)", _, true, _, true, 3.0);
 	cvar.AddChangeHook(CVarChanged_Key);
 	CVarChanged_Key(cvar, "", "");
 
@@ -310,7 +313,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Pos);
 	bPos = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_revival_clean", "2", "Remove body x sec after the death (-1 - don't remove)", _, true, -1.0);
+	cvar = CreateConVar("sm_revival_clean", "1", "Remove body x sec after the death (-1 - don't remove)", _, true, -1.0);
 	cvar.AddChangeHook(CVarChanged_Clean);
 	iClean = cvar.IntValue;
 
@@ -346,7 +349,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Radius);
 	fRadius = cvar.FloatValue;
 
-	cvar = CreateConVar("sm_revival_time", "0", "The time after the death of the player, during which the revive is possible", _, true);
+	cvar = CreateConVar("sm_revival_time", "0", "The time after the death of the player, during which the revive is possible (0 - unlimited)", _, true);
 	cvar.AddChangeHook(CVarChanged_Time);
 	iTime = cvar.IntValue;
 
@@ -366,7 +369,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Risings);
 	iRevived[0] = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_noblock_time", "2", "Noblocking time after respawn(set at 0 if you have any noblock plugin)", _, true);
+	cvar = CreateConVar("sm_revival_noblock_time", "2", "Noblocking time after respawn (set 0 if you have any noblock plugin)", _, true);
 	cvar.AddChangeHook(CVarChanged_NoBlockTime);
 	iNoBlockTime = cvar.IntValue;
 
@@ -394,7 +397,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_RIP);
 	iRIP = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_balance", "1", "The difference in the number of live players of the teams, at which player can revive allies (-1 - disable restriction)", _, true, -1.0, true, 5.0);
+	cvar = CreateConVar("sm_revival_balance", "-1", "The difference in the number of live players of the teams, at which player can revive allies (-1 - disable restriction)", _, true, -1.0, true, 5.0);
 	cvar.AddChangeHook(CVarChanged_Balance);
 	iBalance = cvar.IntValue;
 
@@ -426,7 +429,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_Best);
 	iRevives[0][0] = cvar.IntValue;
 
-	cvar = CreateConVar("sm_revival_worst", "3", "Show AntiTOP revivers at round end (0 - disable)", _, true, _, true, 10.0);
+	cvar = CreateConVar("sm_revival_worst", "0", "Show AntiTOP revivers at round end (0 - disable)", _, true, _, true, 10.0);
 	cvar.AddChangeHook(CVarChanged_Worst);
 	iRevives[0][1] = cvar.IntValue;
 
@@ -495,7 +498,7 @@ public void OnPluginStart()
 
 	if(!bLate) return;
 
-	CreateDissolver();
+	UpdateDissolver();
 	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i)) ReadClientSettings(i);
 	CountAlive();
 }
@@ -536,12 +539,13 @@ public void CVarChanged_Pos(ConVar cvar, const char[] oldVal, const char[] newVa
 public void CVarChanged_Clean(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	iClean = cvar.IntValue;
+	UpdateDissolver();
 }
 
 public void CVarChanged_Dissolve(ConVar cvar, const char[] oldVal, const char[] newVal)
 {
 	iDissolve = cvar.IntValue;
-	CreateDissolver();
+	UpdateDissolver();
 }
 
 public void CVarChanged_Team(ConVar cvar, const char[] oldVal, const char[] newVal)
@@ -935,7 +939,7 @@ public Action HookKeyHintText(UserMsg msg_id, Handle msg, const int[] players, i
 
 	BfReadByte(msg);
 	BfReadString(msg, sKeyHintText[players[0]], sizeof(sKeyHintText[]));
-	RequestFrame(RequestFrame_Callback, players[0]);
+	RequestFrame(RequestFrame_UpdateHUD, players[0]);
 
 	if(hTimerClear[players[0]]) delete hTimerClear[players[0]];
 	if(sKeyHintText[players[0]][0]) hTimerClear[players[0]] = CreateTimer(UPDATE, Timer_ClearBuffer, GetClientUserId(players[0]));
@@ -952,7 +956,7 @@ public Action Timer_ClearBuffer(Handle timer, int client)
 	}
 }
 
-public void RequestFrame_Callback(int client)
+public void RequestFrame_UpdateHUD(int client)
 {
 	UpdateHUD(client);
 }
@@ -1107,25 +1111,26 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 	CreateMark(client);
 
 	if(iTime) CreateTimer(iTime+0.0, Timer_DisableReviving, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
-	if(iClean < 0) return;
-
-	static int offset = -1;
-	if((offset != -1 || (offset = FindSendPropInfo("CCSPlayer", "m_hRagdoll")) != -1)
-	&& (client = GetEntDataEnt2(client, offset)) != -1 && IsValidEntity(client))
-		CreateTimer(iClean+0.0, Timer_RemoveBody, EntIndexToEntRef(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
-public Action Timer_RemoveBody(Handle timer, any ent)
+public void OnEntityCreated(int entity, const char[] cls)
 {
-	if((ent = EntRefToEntIndex(ent)) != -1)
+	if(iClean != -1 && !strcmp(cls, "cs_ragdoll"))
+		CreateTimer(iClean+0.0, Timer_RemoveBody, EntIndexToEntRef(entity), TIMER_FLAG_NO_MAPCHANGE);
+}
+
+public Action Timer_RemoveBody(Handle timer, int entity)
+{
+	static int client;
+	if((entity = EntRefToEntIndex(entity)) == INVALID_ENT_REFERENCE
+	|| (client = GetEntPropEnt(entity, Prop_Send, "m_hPlayer")) < 1 || client > MaxClients) return;
+
+	if(iDissolve != -1 && (IsDissolverExist() || CreateDissolver()))
 	{
-		if(iDissolver != -1 && EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE)
-		{
-			DispatchKeyValue(ent, "targetname", "dissolved_ragdoll");
-			AcceptEntityInput(iDissolver, "Dissolve");
-		}
-		else AcceptEntityInput(ent, "Kill");
+		DispatchKeyValue(entity, "targetname", "dissolved_ragdoll");
+		AcceptEntityInput(iDissolver, "Dissolve");
 	}
+	else AcceptEntityInput(entity, "Kill");
 }
 
 public Action Timer_DisableReviving(Handle timer, any client)
@@ -1187,46 +1192,52 @@ public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
 		bProtected[i] = false;
 	}
 
-	CreateDissolver();
+	UpdateDissolver();
 }
 
-stock void CreateDissolver()
+stock void UpdateDissolver()
 {
-	if(iDissolve == -1)
+	int num;
+	for(int i = 1; i <= MaxClients && num < 1; i++) if(IsClientInGame(i) && IsFakeClient(i)) ++num;
+	if(!num) return;
+
+	if(iDissolve != -1 && iClean != -1)
+		CreateDissolver();
+	else if(IsDissolverExist())
 	{
-		if(EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE) AcceptEntityInput(iDissolver, "Kill");
+		AcceptEntityInput(iDissolver, "Kill");
 		iDissolver = -1;
 	}
-	else if(iDissolver == -1 || EntRefToEntIndex(iDissolver) == INVALID_ENT_REFERENCE)
+}
+
+stock bool CreateDissolver()
+{
+	if(IsDissolverExist()) return true;
+
+	int entity;
+	if((entity = CreateEntityByName("env_entity_dissolver")) == -1)
 	{
-		int entity;
-		if((entity = CreateEntityByName("env_entity_dissolver")) != -1)
-		{
-			static char type[] = "0";
-			type[0] = '0' + iDissolve;
-			DispatchKeyValue(entity, "dissolvetype", type);
-			DispatchKeyValue(entity, "magnitude", "50");
-			DispatchKeyValue(entity, "target", "dissolved_ragdoll");
-			iDissolver = EntIndexToEntRef(entity);
-		}
-		else iDissolver = -1;
+		iDissolver = -1;
+		return false;
 	}
-	else
-	{
-		static int offset = -1;
-		if(offset != -1 || (offset = FindSendPropInfo("CEntityDissolve", "m_nDissolveType")) != -1)
-			SetEntData(EntRefToEntIndex(iDissolver), offset, iDissolve, 4, true);
-		else
-		{
-			LogError("Unable to find offset 'CEntityDissolve::m_nDissolveType'");
-			SetEntProp(EntRefToEntIndex(iDissolver), Prop_Data, "m_nDissolveType", iDissolve);
-		}
-	}
+
+	static char type[] = "0";
+	type[0] = '0' + iDissolve;
+	DispatchKeyValue(entity, "dissolvetype", type);
+	DispatchKeyValue(entity, "magnitude", "50");
+	DispatchKeyValue(entity, "target", "dissolved_ragdoll");
+	iDissolver = EntIndexToEntRef(entity);
+	return true;
+}
+
+stock bool IsDissolverExist()
+{
+	return iDissolver != -1 && EntRefToEntIndex(iDissolver) != INVALID_ENT_REFERENCE;
 }
 
 public void OnEntityDestroyed(int entity)
 {
-	if(iDissolver != -1 && entity == iDissolver) iDissolver = -1;
+	if(iDissolver != -1 && entity == EntRefToEntIndex(iDissolver)) iDissolver = -1;
 }
 
 public Action CS_OnTerminateRound(float& delay, CSRoundEndReason& reason)
@@ -1396,7 +1407,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 			SendProgressBar(client, old_target[client]);
 			old_target[client] = 0;
 		}
-		if(!hTimer && !warned[client])
+		if(!iHUD[client] && !warned[client])
 		{
 			PrintToChatClr(client, "%t%t", "ChatTag", "ChatUnbalanced");
 			warned[client] = true;
@@ -1503,7 +1514,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 					if(iTarget[client] != target[client])
 					{
 						GetClientName(target[client], name, sizeof(name));
-						if(!hTimer) PrintToChatClr(client, "%t%t", "ChatTag", "YouReviving", name);
+						if(!iHUD[client]) PrintToChatClr(client, "%t%t", "ChatTag", "YouReviving", name);
 						if(iReviver[target[client]] != client)
 						{
 							GetClientName(client, name, sizeof(name));
@@ -1777,7 +1788,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	iUses[client]++;
 	iRevived[target]++;
 
-	if(!iTimes || !bMsg && hTimer) return;
+	if(!iTimes || !bMsg && iHUD[client]) return;
 
 	if(iUses[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
 	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iUses[client]);
@@ -1904,7 +1915,8 @@ stock void PrintToChatClr(int client, const char[] msg, any ...)
 
 	SetGlobalTransTarget(client);
 	static char buffer[PLATFORM_MAX_PATH], new_msg[PLATFORM_MAX_PATH];
-	if(iEngine != E_Unknown) FormatEx(buffer, sizeof(buffer), "%s\x01%s", iEngine == E_CSGO ? " " : "", msg);
+//	if(iEngine != E_Unknown) FormatEx(buffer, sizeof(buffer), "%s\x01%s", iEngine == E_CSGO ? " " : "", msg);
+	if(iEngine != E_Unknown) FormatEx(buffer, sizeof(buffer), "\x01%s", msg);
 	VFormat(new_msg, sizeof(new_msg), buffer, 3);
 
 	if(iEngine) for(int i; i < 16; i++) ReplaceString(new_msg, sizeof(new_msg), CLR[i][0], CLR[i][iEngine]);
