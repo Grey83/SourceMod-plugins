@@ -1,0 +1,59 @@
+"Phrases"
+{
+	"State_Healthy"
+	{
+		"en"	"♡"
+	}
+	"State_Infected"
+	{
+		"en"	"☣"
+	}
+	"State_Extracted"
+	{
+		"en"	"☺"
+	}
+	"State_Dead"
+	{
+		"en"	"☠"
+	}
+
+	"Hint_HP"
+	{
+		"#format"	"{1:t},{2:d},{3:t}"
+		"en"	"{1}{2}HP{3}"
+	}
+	"Hint_AP"
+	{
+		"#format"	"{1:d},{2:t}"
+		"en"	"{1}AP{3}"
+	}
+	"Hint_SP"
+	{
+		"#format"	"{1:d}"
+		"en"	"{1}⁰⁄₀SP"
+	}
+	"Hint_EMPTY"	// empty string, no changes needed
+	{
+		"en"	""
+	}
+	"Hint_Max"
+	{
+		"en"	" (max)"
+	}
+
+	"HUD_HP"
+	{
+		"#format"	"{1:t},{2:d}"
+		"en"	"{1}{2}"
+	}
+	"HUD_AP"
+	{
+		"#format"	"{1:d}"
+		"en"	"♦{1}"
+	}
+	"HUD_SP"
+	{
+		"#format"	"{1:d}"
+		"en"	"↔{1}⁰⁄₀"
+	}
+}
