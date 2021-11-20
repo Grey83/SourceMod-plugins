@@ -5,12 +5,22 @@
 
 static const char
 	PL_NAME[]	= "[NMRiH] Health & Armor Vampirism",
-	PL_VER[]	= "1.0.4_20.11.2021",
+	PL_VER[]	= "1.0.5_21.11.2021",
 
 // HUD settings
-	STATE[][]	= {"♡", "☣", "☺", "☠"};	// healthy, infected, extracted, dead
+	STATE[][]	= {"State_Healthy", "State_Infected", "State_Extracted", "State_Dead"};	// healthy, infected, extracted, dead
 static const int
 	CLR[][]		= {{0, 255, 0}, {255, 127, 0}, {255, 255, 255}, {255, 0, 0}};	// R, G, B, A
+
+enum
+{
+	S_Healthy,
+	S_Infected,
+	S_Extracted,
+	S_Dead,
+
+	S_Total
+};
 
 Handle
 	hHUD,
@@ -97,11 +107,11 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChanged_CD);
 	CVarChanged_CD(cvar, NULL_STRING, NULL_STRING);
 
-	cvar = CreateConVar("sm_hav_hud_x", "0.01", "HUD info position X (0.0 - 1.0 left to right or -1 for center)", _, true, -2.0, true, 1.0);
+	cvar = CreateConVar("sm_hav_hud_x", "0.01", "HUD info position X (0.0 - 1.0 left to right or -1.0 for center)", _, true, -2.0, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_PosX);
 	fPosX = cvar.FloatValue;
 
-	cvar = CreateConVar("sm_hav_hud_y", "1.00", "HUD info position Y (0.0 - 1.0 top to bottom or -1 for center)", _, true, -2.0, true, 1.0);
+	cvar = CreateConVar("sm_hav_hud_y", "1.00", "HUD info position Y (0.0 - 1.0 top to bottom or -1.0 for center)", _, true, -2.0, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_PosY);
 	fPosY = cvar.FloatValue;
 
@@ -110,6 +120,8 @@ public void OnPluginStart()
 	fMaxStamina = cvar.FloatValue;
 
 	AutoExecConfig(true, "nmrih_hav");
+
+	LoadTranslations("nmrih_hav.phrases");
 
 	HookEvent("player_death", Event_PD);
 	HookEvent("player_spawn", Event_PS);
@@ -340,13 +352,15 @@ stock void UpdateHint(const int client, int hp = -1, int armor = -1)
 {
 	static char txt[32];
 	if(hp == -1) hp = GetClientHealth(client);
-	FormatEx(txt, sizeof(txt), "%s%iHP%s", IsPlayerInfected(client) ? "☣" : "", hp, hp < iMaxHP ? "" : " (max)");
+
+	SetGlobalTransTarget(client);
+	FormatEx(txt, sizeof(txt), "%t", "Hint_HP", IsPlayerInfected(client) ? "State_Infected" : "Hint_EMPTY", hp, hp < iMaxHP ? "Hint_EMPTY" : "Hint_Max");
 	if(iMaxAP)
 	{
 		if(armor == -1) armor = GetEntProp(client, Prop_Data, "m_ArmorValue");
-		Format(txt, sizeof(txt), "%s %iAP%s", txt, armor, armor < iMaxAP ? "" : " (max)");
+		Format(txt, sizeof(txt), "%s %t", txt, "Hint_AP", armor, armor < iMaxAP ? "Hint_EMPTY" : "Hint_Max");
 	}
-	if(bStamina) Format(txt, sizeof(txt), "%s %iSP", txt, GetStaminaLvl(client));
+	if(bStamina) Format(txt, sizeof(txt), "%s %t", txt, "Hint_SP", GetStaminaLvl(client));
 	PrintHintText(client, txt);
 }
 
@@ -357,18 +371,19 @@ static void UpdateHUD(const int client, int hp = -1, int armor = -1)
 	state = IsPlayerAlive(client) ? (IsPlayerInfected(client) ? 1 : 0) : (bExtracted[client] ? 2 : 3);
 	SetHudTextParams(fPosX, fPosY, fCD + 0.1, CLR[state][0], CLR[state][1], CLR[state][2], 127, 0, 0.0, 0.1, 0.1);
 
+	SetGlobalTransTarget(client);
 	if(state > 1)
-		FormatEx(txt, sizeof(txt), STATE[state]);
+		FormatEx(txt, sizeof(txt), "%t", STATE[state]);
 	else
 	{
 		if(hp == -1) hp = GetClientHealth(client);
-		FormatEx(txt, sizeof(txt), "%s%i", STATE[state], hp);
+		FormatEx(txt, sizeof(txt), "%t", "HUD_HP", STATE[state], hp);
 		if(iMaxAP)
 		{
 			if(armor == -1) armor = GetEntProp(client, Prop_Data, "m_ArmorValue");
-			Format(txt, sizeof(txt), "%s\n♦%i", txt, armor);
+			Format(txt, sizeof(txt), "%s\n%t", txt, "HUD_AP", armor);
 		}
-		if(bStamina)	Format(txt, sizeof(txt), "%s\n↔%i", txt, GetStaminaLvl(client));
+		if(bStamina)	Format(txt, sizeof(txt), "%s\n%t", txt, "HUD_SP", GetStaminaLvl(client));
 	}
 
 	ShowSyncHudText(client, hHUD, txt);
