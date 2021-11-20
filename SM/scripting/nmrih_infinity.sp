@@ -1,12 +1,7 @@
-#pragma semicolon 1	// Fixed error "Exception reported: Entity -1 (-1) is invalid"
+#pragma semicolon 1
 #pragma newdecls required
 
 #define MAX_PLAYERS	8	// maximum number of players on the NMRiH server
-
-#if SOURCEMOD_V_MINOR > 10
-	#define PL_NAME	"[NMRiH] Infinity"
-	#define PL_VER	"1.3.0_04.10.2021"
-#endif
 
 #include <sdkhooks>
 #include <sdktools_entinput>
@@ -16,10 +11,9 @@ static const int
 	IN_SHOVE	= (1 << 27);
 
 static const char
-#if SOURCEMOD_V_MINOR < 11
 	PL_NAME[]	= "[NMRiH] Infinity",
-	PL_VER[]	= "1.3.0_04.10.2021",
-#endif
+	PL_VER[]	= "1.3.1_20.11.202",
+
 	PL_TAG[]	= ",infinite_ammo",
 	AMMO[][]	=
 {
@@ -375,7 +369,7 @@ public void Event_Weapon(Event event, const char[] name, bool dontBroadcast)
 
 	int client = event.GetInt("player_id");
 	if(name[7] == 'r') client = GetClientOfUserId(client);
-	if(client && IsPlayerAlive(client)) ShowAmmo(client);
+	if(0 < client && IsPlayerAlive(client)) ShowAmmo(client);
 }
 
 stock void ShowAmmo(int client)
