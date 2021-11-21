@@ -1,0 +1,16 @@
+﻿"Phrases"
+{
+	"Announcer country found"
+	{
+		"#format"	"{1:N},{2:s}"
+		"en"		"{1} from {2} joined the game"
+		"ru"		"{1} из {2} присоединился к игре"
+	}
+	
+	"Announcer country not found"
+	{
+		"#format"	"{1:N}"
+		"en"		"{1} from a distant planet joined the game"
+		"ru"		"{1} с далёкой планеты присоединился к игре"
+	}
+}
