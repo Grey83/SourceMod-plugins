@@ -1,0 +1,40 @@
+//	You can use this symbols for setting colors:
+//	"\x01" = "", "\x02" = "", "\x03" = "", "\x04" = "", "\x05" = "", "\x06" = ""
+//	custom colors in CS:S:
+//	"\x07" = "" (for RrGgBb), "\x08" = "" (for RrGgBbAa)
+//	colors only for CSGO:
+//	"\x09" = "	", "\x0B" = "", "\x0C" = "", "\x0E" = "", "\x0F" = ""
+
+"Phrases"
+{
+	"PlantStateChanged"
+	{
+		"#format"	"{1:c},{2:t}"
+		"en"	"ffffffSite fa00fa{1} {2}ffffff!"	// CS:S
+		"ru"	"ffffffПлент fa00fa{1} {2}ffffff!"	// CS:S
+//		"en"	"Site {1} {2}!"	// CS:GO
+//		"ru"	"Плент {1} {2}!"	// CS:GO
+	}
+	"Enabled"
+	{
+		"en"	"00ff00unlocked"		// CS:S
+		"ru"	"00ff00разблокирован"	// CS:S
+//		"en"	"unlocked"			// CS:GO
+//		"ru"	"разблокирован"	// CS:GO
+	}
+	"Disabled"
+	{
+		"en"	"ff4040locked"			// CS:S
+		"ru"	"ff4040заблокирован"	// CS:S
+//		"en"	"locked"		// CS:GO
+//		"ru"	"заблокирован"	// CS:GO
+	}
+	"NumberNotify"
+	{
+		"#format"	"{1:i}"
+		"en"	"ffffffTo unlock need ff4040{1} ffffffmore player(s) in teams."					// CS:S
+		"ru"	"ffffffДля разблокировки необходимо ещё ff4040{1} ffffffчеловек(а) в командах."	// CS:S
+//		"en"	"To unlock need {1} more player(s) in teams."					// CS:GO
+//		"ru"	"Для разблокировки необходимо ещё {1} человек(а) в командах."	// CS:GO
+	}
+}
