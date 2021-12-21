@@ -8,7 +8,7 @@
 #include <sdktools_entoutput>
 #tryinclude <sdktools_variant_t>
 
-#define PL_VER "2.5.0"
+#define PL_VER "2.5.2"
 
 static const int ADMIN_FLAG = ADMFLAG_ROOT;	// access flag for health commands
 
@@ -56,7 +56,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChange_Center);
 	bCenter = cvar.BoolValue;
 
-	cvar = CreateConVar("sm_bhud_flags", "", "Flags, one of which the player must have to see info. Empty - for all", _, true, _, true, 1.0);
+	cvar = CreateConVar("sm_bhud_flags", "", "Flags, one of which the player must have to see info. Empty - for all", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChange_Flags);
 	CVarChange_Flags(cvar, "", "");
 
@@ -76,7 +76,7 @@ public void OnPluginStart()
 	cvar.AddChangeHook(CVarChange_PosX);
 	fPosX = cvar.FloatValue;
 
-	cvar = CreateConVar("sm_bhud_y", "0.09", "HUD info position Y (0.0 - 1.0 top to bottom or -1.0 for center)", _, true, -2.0, true, 1.0);
+	cvar = CreateConVar("sm_bhud_y", "0.9", "HUD info position Y (0.0 - 1.0 top to bottom or -1.0 for center)", _, true, -2.0, true, 1.0);
 	cvar.AddChangeHook(CVarChange_PosY);
 	fPosY = cvar.FloatValue;
 
@@ -215,9 +215,10 @@ public void OnClientCookiesCached(int client)
 	bShow[client] = !buffer[0] ? bShow[0] : buffer[0] == '1';
 }
 
-public void OnEntityCreated(int entity, const char[] classname)
+public void OnEntityCreated(int ent, const char[] classname)
 {
-	if(!strcmp(classname, "math_counter", false)) RequestFrame(RequestFrame_CheckEnt, EntIndexToEntRef(entity));
+	if(!strcmp(classname, "math_counter", false))
+		RequestFrame(RequestFrame_CheckEnt, 0 < ent && ent <= 4096 ? EntIndexToEntRef(ent) : ent);
 }
 
 public void RequestFrame_CheckEnt(int entity)
@@ -231,9 +232,9 @@ public void RequestFrame_CheckEnt(int entity)
 
 public void OnDamaged(const char[] output, int caller, int activator, float delay)
 {
-	if(!IsValidClient(activator)) return;
+	if(!IsValidClient(activator) ) return;
 
-	iEntRef[activator] = EntIndexToEntRef(caller);
+	iEntRef[activator] = 0 < caller && caller <= 4096 ? EntIndexToEntRef(caller) : caller;
 	ShowInfo(activator, caller, output[1] == 'u');
 }
 
@@ -269,7 +270,13 @@ stock void ShowInfo(int client, int entity, bool math_counter)
 		health = RoundFloat(GetEntDataFloat(entity, offset));
 		if(GetTrieValue(smMaxes, name, max) && max != (val = GetEntMax(entity))) health = val - health;
 	}
-	else if((health = GetEntProp(entity, Prop_Data, "m_iHealth")) < 1 && health > 900000) return;
+	else health = GetEntProp(entity, Prop_Data, "m_iHealth");
+
+	if(health < 1 && health > 900000000)
+	{
+		if(!bCenter) ClearSyncHud(client, hHUD);
+		return;
+	}
 
 	if(!bCenter)
 	{
