@@ -272,7 +272,7 @@ stock void ShowInfo(int client, int entity, bool math_counter)
 	}
 	else health = GetEntProp(entity, Prop_Data, "m_iHealth");
 
-	if(health < 1 && health > 900000000)
+	if(health < 1 || health > 900000000)
 	{
 		if(!bCenter) ClearSyncHud(client, hHUD);
 		return;
