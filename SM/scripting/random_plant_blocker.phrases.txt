@@ -37,4 +37,27 @@
 //		"en"	"To unlock need {1} more player(s) in teams."					// CS:GO
 //		"ru"	"Для разблокировки необходимо ещё {1} человек(а) в командах."	// CS:GO
 	}
+
+	"HUD_PlantStateChanged"
+	{
+		"#format"	"{1:c},{2:t}"
+		"en"	"Site '{1}' {2}!"
+		"ru"	"Плент '{1}' {2}!"
+	}
+	"HUD_Enabled"
+	{
+		"en"	"unlocked"
+		"ru"	"разблокирован"
+	}
+	"HUD_Disabled"
+	{
+		"en"	"locked"
+		"ru"	"заблокирован"
+	}
+	"HUD_NumberNotify"
+	{
+		"#format"	"{1:i}"
+		"en"	"To unlock need {1} more player(s) in teams."
+		"ru"	"Для разблокировки необходимо ещё {1} человек(а) в командах."
+	}
 }
