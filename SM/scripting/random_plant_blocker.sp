@@ -7,7 +7,7 @@
 
 static const char
 	PL_NAME[]	= "Random plant blocker",
-	PL_VER[]	= "1.0.0_20.12.2021";
+	PL_VER[]	= "1.0.1_29.12.2021";
 
 enum
 {
@@ -20,6 +20,8 @@ enum
 	H_Total
 };
 
+Handle
+	hHUD;
 bool
 	bHook[H_Total],
 	bCheck,
@@ -42,6 +44,9 @@ public Plugin myinfo =
 
 public void OnPluginStart()
 {
+	EngineVersion ev = GetEngineVersion();
+	if(ev == Engine_CSS || ev == Engine_CSGO) hHUD = CreateHudSynchronizer();
+
 	LoadTranslations("random_plant_blocker.phrases");
 
 	CreateConVar("sm_rpb_version", PL_VER, PL_NAME, FCVAR_DONTRECORD|FCVAR_NOTIFY|FCVAR_SPONLY);
@@ -93,11 +98,31 @@ stock void CreateEventHooks()
 
 stock void DeleteEventHooks()
 {
-	if(bHook[H_Team])	UnhookEvent("player_team",		Event_Team, EventHookMode_PostNoCopy);
-	if(bHook[H_Start])	UnhookEvent("round_freeze_end",	Event_Round, EventHookMode_PostNoCopy);
-	if(bHook[H_End])	UnhookEvent("round_end",		Event_Round, EventHookMode_PostNoCopy);
-	if(bHook[H_Begin])	UnhookEvent("bomb_beginplant",	Event_Bomb, EventHookMode_PostNoCopy);
-	if(bHook[H_Abort])	UnhookEvent("bomb_abortplant",	Event_Bomb, EventHookMode_PostNoCopy);
+	if(bHook[H_Team])
+	{
+		UnhookEvent("player_team",		Event_Team, EventHookMode_PostNoCopy);
+		bHook[H_Team] = false;
+	}
+	if(bHook[H_Start])
+	{
+		UnhookEvent("round_freeze_end",	Event_Round, EventHookMode_PostNoCopy);
+		bHook[H_Start] = false;
+	}
+	if(bHook[H_End])
+	{
+		UnhookEvent("round_end",		Event_Round, EventHookMode_PostNoCopy);
+		bHook[H_End] = false;
+	}
+	if(bHook[H_Begin])
+	{
+		UnhookEvent("bomb_beginplant",	Event_Bomb, EventHookMode_PostNoCopy);
+		bHook[H_Begin] = false;
+	}
+	if(bHook[H_Abort])
+	{
+		UnhookEvent("bomb_abortplant",	Event_Bomb, EventHookMode_PostNoCopy);
+		bHook[H_Abort] = false;
+	}
 }
 
 public void OnClientDisconnect(int client)
@@ -112,27 +137,27 @@ public void Event_Team(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_Round(Event event, const char[] name, bool dontBroadcast)
 {
-	bPlanting = false;
+	if(bBlock) TriggerFuncBombTarget(false);
+	bPlanting = bBlock = false;
 	if(!(bCheck = name[6] == 'f'))
-	{
-		if(bBlock) TriggerFuncBombTarget(false);
-		bBlock = false;
 		return;
-	}
 
 	iFuncBombTarget = -1;
-	bBlock = false;
 
 	if(iPlant < 0) iBlockedPlant = GetRandomInt(0, 99) % 2;	// выбираем случайный плент для блокировки
 	else iBlockedPlant = iPlant;
 
 	int ent = -1;
-	if((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1
-	&& (!iBlockedPlant || (ent = FindEntityByClassname(ent, "func_bomb_target")) != -1))
+	if((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1)
+	{
 		iFuncBombTarget = EntIndexToEntRef(ent);
-
-	GetOnlinePlayers();
-
+		if(iBlockedPlant)
+		{
+			if((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1)
+			iFuncBombTarget = EntIndexToEntRef(ent);
+		}
+		GetOnlinePlayers();
+	}
 }
 
 public void Event_Bomb(Event event, const char[] name, bool dontBroadcast)
@@ -142,7 +167,7 @@ public void Event_Bomb(Event event, const char[] name, bool dontBroadcast)
 
 stock void GetOnlinePlayers()
 {
-	if(bPlanting) return;
+	if(bPlanting || !IsFuncBombTargetValid()) return;
 
 	int num;
 	for(int i = 1; i <= MaxClients && num <= iPlayers; i++) if(IsClientInGame(i) && GetClientTeam(i) > 1) num++;
@@ -154,12 +179,28 @@ stock void GetOnlinePlayers()
 
 	TriggerFuncBombTarget(bBlock);
 
-	PrintToChatAll("%t", "PlantStateChanged", iBlockedPlant ? 'B' : 'A', bBlock ? "Disabled" : "Enabled");
-	if(bBlock) PrintToChatAll("%t", "NumberNotify", iPlayers - num);
+	char txt[PLATFORM_MAX_PATH];
+	if(hHUD) SetHudTextParams(-1.0, -1.0, 3.0, 256, 128, 0, 255, 0, 0.0, 0.0, 0.5);
+
+	for(int i = 1; i <= MaxClients; i++)
+		if(IsClientInGame(i) && (!IsFakeClient(i) || IsClientSourceTV(i) || IsClientReplay(i)))
+		{
+			PrintToChat(i, "%t", "PlantStateChanged", iBlockedPlant ? 'B' : 'A', bBlock ? "Disabled" : "Enabled");
+			if(bBlock) PrintToChat(i, "%t", "NumberNotify", iPlayers - num);
+			if(!hHUD) continue;
+
+			FormatEx(txt, sizeof(txt), "%T", "HUD_PlantStateChanged", i, iBlockedPlant ? 'B' : 'A', bBlock ? "HUD_Disabled" : "HUD_Enabled");
+			if(!bBlock) Format(txt, sizeof(txt), "%s\n%T", txt, "HUD_NumberNotify", i, iPlayers - num);
+			ShowSyncHudText(i, hHUD, txt);
+		}
 }
 
 stock void TriggerFuncBombTarget(bool disable)
 {
-	if(iFuncBombTarget != -1 && EntRefToEntIndex(iFuncBombTarget) != INVALID_ENT_REFERENCE)
-		AcceptEntityInput(iFuncBombTarget, disable ? "Disable" : "Enable");	// DisableAndEndTouch
+	if(IsFuncBombTargetValid()) AcceptEntityInput(iFuncBombTarget, disable ? "Disable" : "Enable");	// DisableAndEndTouch
+}
+
+stock bool IsFuncBombTargetValid()
+{
+	return iFuncBombTarget != -1 && EntRefToEntIndex(iFuncBombTarget) != INVALID_ENT_REFERENCE;
 }
