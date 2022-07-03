@@ -12,7 +12,7 @@ static const int
 
 static const char
 	PL_NAME[]	= "[NMRiH] Infinity",
-	PL_VER[]	= "1.3.1_20.11.202",
+	PL_VER[]	= "1.3.1_03.07.2022",
 
 	PL_TAG[]	= ",infinite_ammo",
 	AMMO[][]	=
@@ -129,7 +129,7 @@ public void OnPluginStart()
 
 	cvar = CreateConVar("sm_inf_adm",		"1", "Ammo mode for admins:\n 0 - Normal mode\n 1 - Infinite ammo\n 2 - Infinite clip", _, true, _, true, 2.0);
 	cvar.AddChangeHook(CVarChanged_Adm);
-	iMode[1] = cvar.IntValue;
+	iMode[1] = cvar.IntValue | iMode[0];
 
 	cvar = CreateConVar("sm_inf_stamina",	"1", "On/Off Infinite stamina.", _, true, _, true, 1.0);
 	cvar.AddChangeHook(CVarChanged_Stamina);
@@ -194,7 +194,7 @@ public void OnPluginEnd()
 
 public void CVarChanged_Ammo(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	iMode[0] = cvar.IntValue;
+	iMode[1] |= (iMode[0] = cvar.IntValue);
 	Server_Tag();
 }
 
@@ -374,7 +374,7 @@ public void Event_Weapon(Event event, const char[] name, bool dontBroadcast)
 
 stock void ShowAmmo(int client)
 {
-	if(iWeapon[client] <= MaxClients || !IsValidEdict(iWeapon[client])) return;
+	if(!hHUD || iWeapon[client] <= MaxClients || !IsValidEdict(iWeapon[client])) return;
 
 	static int type;
 	static char txt[20];
@@ -418,30 +418,28 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		SetEntData(client, iOffset[O_Sprint], 1, true);
 	}
 
-	if(!iMode[view_as<int>(bIsAdmin[client])] || !iClip[client] || !iWeapon[client])
+	static int mode;
+	if(!(mode = iMode[view_as<int>(bIsAdmin[client])]) || !iClip[client] || !iWeapon[client])
 		return Plugin_Continue;
 
-	if(buttons & IN_RELOAD) SetClip(client);
-
-	if(iMode[view_as<int>(bIsAdmin[client])] & 2)	// Infinite clip
+	if(mode & 2)	// Infinite clip
 	{
 		if(buttons & IN_ATTACK) SetEntData(iWeapon[client], iOffset[O_Clip], iClip[client], _, true);
 		if(buttons & IN_BULLRUSH)
 		{
-			buttons &= ~IN_BULLRUSH;	// ...и изъятие патронов при бесконечной обойме
+			buttons &= ~IN_BULLRUSH;	// блокируем изъятие патронов при бесконечной обойме
 			return Plugin_Changed;
 		}
 	}
+	else if(buttons & IN_RELOAD)	// Infinite ammo
+	{
+		static int ammo, clip;
+		ammo = iOffset[O_Ammo] + (GetEntData(iWeapon[client], iOffset[O_Type]) << 2);
+		if((clip = iClip[client] - GetEntData(iWeapon[client], iOffset[O_Clip])) != GetEntData(client, ammo))
+			SetEntData(client, ammo, clip, _, true);
+	}
 
 	return Plugin_Continue;
-}
-
-stock void SetClip(int client)
-{
-	static int ammo, clip;
-	ammo = iOffset[O_Ammo] + (GetEntData(iWeapon[client], iOffset[O_Type]) << 2);
-	if((clip = iClip[client] - GetEntData(iWeapon[client], iOffset[O_Clip])) != GetEntData(client, ammo))
-		SetEntData(client, ammo, clip, _, true);
 }
 
 stock bool IsValidClient(int client)
