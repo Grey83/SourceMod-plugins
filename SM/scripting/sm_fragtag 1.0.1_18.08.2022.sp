@@ -70,7 +70,7 @@ public void OnClientSettingsChanged(int client)
 public void Event_Player(Event event, const char[] name, bool dontBroadcast)
 {
 	int client = GetClientOfUserId(event.GetInt("attacker"));
-	if(client && client != GetClientOfUserId(event.GetInt("userid")) && !IsPlayerValid(client))
+	if(client && client != GetClientOfUserId(event.GetInt("userid")) && IsPlayerValid(client))
 		CreateTimer(0.1, Timer_Death, GetClientUserId(client), TIMER_FLAG_NO_MAPCHANGE);
 }
 
