@@ -6,7 +6,7 @@
 
 static char
 	PL_NAME[]	= "[CSGO] FragTag",
-	PL_VER[]	= "1.0.0_18.08.2022",
+	PL_VER[]	= "1.0.1_18.08.2022",
 
 	TAG[] = "<%i>";	// Clantag should contain only one format specifier: '%i'
 
@@ -60,6 +60,11 @@ public void OnMapStart()
 	bLate = false;
 	GetEntDataArray(iManager, iOffset, kills, sizeof(kills));
 	for(int i = 1; i <= MaxClients; i++) if(IsPlayerValid(i)) SetPlayerClanTag(i);
+}
+
+public void OnClientSettingsChanged(int client)
+{
+	if(IsPlayerValid(client)) Timer_Death(null, GetClientUserId(client));
 }
 
 public void Event_Player(Event event, const char[] name, bool dontBroadcast)
