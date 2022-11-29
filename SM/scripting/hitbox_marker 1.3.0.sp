@@ -22,7 +22,7 @@ enum
 
 static const char
 	PL_NAME[]	= "[CS:GO] Hitbox marker",
-	PL_VER[]	= "1.0.0",
+	PL_VER[]	= "1.3.0",
 
 	INFO_TYPE[][] =
 {
