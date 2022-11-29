@@ -1,0 +1,105 @@
+// Теги для отображения информации:
+//  голова - "{Head}", шея - "{Neck}", гр.клетка - "{Chest}", правая рука - "{RArm}", левая рука - "{LArm}",
+//  живот - "{Belly}", правая нога - "{RLeg}", левая нога - "{LLeg}", перевод строки - "{NL}".
+// Отступ (для HUD) - "", конец закрашивания (только для текста "NoCount_*") - "{/Clr}"
+
+"Phrases"
+{
+	// Меню
+	"Menu_Title"
+	{
+		"en"	"Hitbox marker"
+		"ru"	"Hitbox marker"
+	}
+	"Menu_Show"
+	{
+		"en"	"Show"
+		"ru"	"Отображать"
+	}
+	"Menu_InfoFull"
+	{
+		"en"	"Full info"
+		"ru"	"Всю информацию"
+	}
+	"Menu_InfoHits"
+	{
+		"en"	"Hits only"
+		"ru"	"Только попадения"
+	}
+	"Menu_Disable"
+	{
+		"en"	"Disable"
+		"ru"	"Отключить"
+	}
+	"Menu_Place"
+	{
+		"en"	"Show in the"
+		"ru"	"Отображать в"
+	}
+	"Menu_HUD"
+	{
+		"en"	"HUD"
+		"ru"	"HUD"
+	}
+	"Menu_HintHits"
+	{
+		"en"	"Hint (hits)"
+		"ru"	""
+	}
+	"Menu_HintNoHits"
+	{
+		"en"	"Hint (no hits)"
+		"ru"	""
+	}
+	"Menu_After"
+	{
+		"en"	"Show after"
+		"ru"	"Отображать после"
+	}
+	"Menu_Death"
+	{
+		"en"	"Death"
+		"ru"	"Смерти"
+	}
+	"Menu_Hit"
+	{
+		"en"	"Hit"
+		"ru"	"Попадения"
+	}
+
+	// Вывод в HUD
+	"HUD_HitsInfo"
+	{
+		"en"	"({Head}){NL} {Neck}{NL}  =-{RArm}--[{Chest}]--{LArm}-={NL}   [{Belly}]{NL}      {RLeg} {LLeg}{NL}_/   \\_"
+		"ru"	"({Head}){NL} {Neck}{NL}  =-{RArm}--[{Chest}]--{LArm}-={NL}   [{Belly}]{NL}      {RLeg} {LLeg}{NL}_/   \\_"
+	}
+	"HUD_FullInfo"
+	{
+		"en"	"({Head}){NL} {Neck}{NL}  =-{RArm}--[{Chest}]--{LArm}-={NL}   [{Belly}]{NL}      {RLeg} {LLeg}{NL}_/   \\_{NL} TOTAL HITS: {Hits}{NL} HEALTH: {Health}{NL} ARMOR: {Armor}"
+		"ru"	"({Head}){NL} {Neck}{NL}  =-{RArm}--[{Chest}]--{LArm}-={NL}   [{Belly}]{NL}      {RLeg} {LLeg}{NL}_/   \\_{NL} Попадений: {Hits}{NL} Здоровье: {Health}{NL} Броня: {Armor}"
+	}
+
+	// Вывод в Hint с количеством попаданий в хитбокс
+	"Hint_HitsInfo"
+	{
+		"en"	"({Head}){NL}{Neck}{NL}=-{RArm}--[{Chest}]--{LArm}-={NL}[{Belly}]{NL}{RLeg} {LLeg}{NL}_/   \\_"
+		"ru"	"({Head}){NL}{Neck}{NL}=-{RArm}--[{Chest}]--{LArm}-={NL}[{Belly}]{NL}{RLeg} {LLeg}{NL}_/   \\_"
+	}
+	"Hint_FullInfo"
+	{
+		"en"	"({Head}){NL}{Neck}{NL}=-{RArm}--[{Chest}]--{LArm}-={NL}[{Belly}]{NL}{RLeg} {LLeg}{NL}_/   \\_{NL}TOTAL HITS: {Hits}{NL}HEALTH: {Health}{NL}ARMOR: {Armor}"
+		"ru"	"({Head}){NL}{Neck}{NL}=-{RArm}--[{Chest}]--{LArm}-={NL}[{Belly}]{NL}{RLeg} {LLeg}{NL}_/   \\_{NL}Попадений: {Hits}{NL}Здоровье: {Health}{NL}Броня: {Armor}"
+	}
+
+	// Вывод в Hint без количества попаданий в хитбокс
+	"NoCount_HitsInfo"
+	{
+		"en"	"{Head}( ){/Clr}{NL}{Neck}|{/Clr}{NL}{RArm}=---{/Clr}{Chest}[]{/Clr}{LArm}---={/Clr}{NL}{Belly}[]{/Clr}{NL}{RLeg}/{/Clr} {LLeg}\\{/Clr}{NL}{RLeg}_/{/Clr}   {LLeg}\\_{/Clr}"
+		"ru"	"{Head}( ){/Clr}{NL}{Neck}|{/Clr}{NL}{RArm}=---{/Clr}{Chest}[]{/Clr}{LArm}---={/Clr}{NL}{Belly}[]{/Clr}{NL}{RLeg}/{/Clr} {LLeg}\\{/Clr}{NL}{RLeg}_/{/Clr}   {LLeg}\\_{/Clr}"
+	}
+	"NoCount_FullInfo"
+	{
+		"en"	"{Head}( ){/Clr}{NL}{Neck}|{/Clr}{NL}{RArm}=---{/Clr}{Chest}[]{/Clr}{LArm}---={/Clr}{NL}{Belly}[]{/Clr}{NL}{RLeg}/{/Clr} {LLeg}\\{/Clr}{NL}{RLeg}_/{/Clr}   {LLeg}\\_{/Clr}{NL}TOTAL HITS: {Hits}{NL}HEALTH: {Health}{NL}ARMOR: {Armor}"
+		"ru"	"{Head}( ){/Clr}{NL}{Neck}|{/Clr}{NL}{RArm}----{/Clr}{Chest}[]{/Clr}{LArm}----{/Clr}{NL}{Belly}[]{/Clr}{NL}{RLeg}/{/Clr} {LLeg}\\{/Clr}{NL}{RLeg}_/{/Clr}   {LLeg}\\_{/Clr}{NL}Попадений: {Hits}{NL}Здоровье: {Health}{NL}Броня: {Armor}"
+	}
+}
