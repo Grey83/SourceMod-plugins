@@ -7,7 +7,7 @@
 
 static const char
 	PL_NAME[]	= "Random plant blocker",
-	PL_VER[]	= "1.0.1_29.12.2021";
+	PL_VER[]	= "1.0.2_13.12.2022";
 
 enum
 {
@@ -147,16 +147,25 @@ public void Event_Round(Event event, const char[] name, bool dontBroadcast)
 	if(iPlant < 0) iBlockedPlant = GetRandomInt(0, 99) % 2;	// выбираем случайный плент для блокировки
 	else iBlockedPlant = iPlant;
 
-	int ent = -1;
-	if((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1)
+	float min[3], max[3], pos[3];
+	int ent = MaxClients+1;
+	if((ent = FindEntityByClassname(ent, "cs_player_manager")) != -1)
 	{
-		iFuncBombTarget = EntIndexToEntRef(ent);
-		if(iBlockedPlant)
+		GetEntPropVector(ent, Prop_Send, iBlockedPlant ? "m_bombsiteCenterB" : "m_bombsiteCenterA", pos);
+	}
+
+	ent = MaxClients+1;
+	while((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1)
+	{
+		GetEntPropVector(ent, Prop_Data, "m_vecMins", min);
+		GetEntPropVector(ent, Prop_Data, "m_vecMaxs", max);
+
+		if(min[0] < pos[0] && pos[0] < max[0] && min[1] < pos[1] && pos[1] < max[1] && min[2] < pos[2] && pos[2] < max[2])
 		{
-			if((ent = FindEntityByClassname(ent, "func_bomb_target")) != -1)
 			iFuncBombTarget = EntIndexToEntRef(ent);
+			GetOnlinePlayers();
+			return;
 		}
-		GetOnlinePlayers();
 	}
 }
 
@@ -185,12 +194,12 @@ stock void GetOnlinePlayers()
 	for(int i = 1; i <= MaxClients; i++)
 		if(IsClientInGame(i) && (!IsFakeClient(i) || IsClientSourceTV(i) || IsClientReplay(i)))
 		{
-			PrintToChat(i, "%t", "PlantStateChanged", iBlockedPlant ? 'B' : 'A', bBlock ? "Disabled" : "Enabled");
+			PrintToChat(i, "%t", "PlantStateChanged", 'A' + iBlockedPlant, bBlock ? "Disabled" : "Enabled");
 			if(bBlock) PrintToChat(i, "%t", "NumberNotify", iPlayers - num);
 			if(!hHUD) continue;
 
-			FormatEx(txt, sizeof(txt), "%T", "HUD_PlantStateChanged", i, iBlockedPlant ? 'B' : 'A', bBlock ? "HUD_Disabled" : "HUD_Enabled");
-			if(!bBlock) Format(txt, sizeof(txt), "%s\n%T", txt, "HUD_NumberNotify", i, iPlayers - num);
+			FormatEx(txt, sizeof(txt), "%T", "HUD_PlantStateChanged", i, 'A' + iBlockedPlant, bBlock ? "HUD_Disabled" : "HUD_Enabled");
+			if(bBlock) Format(txt, sizeof(txt), "%s\n%T", txt, "HUD_NumberNotify", i, iPlayers - num);
 			ShowSyncHudText(i, hHUD, txt);
 		}
 }
