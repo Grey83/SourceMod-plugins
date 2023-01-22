@@ -6,9 +6,7 @@
 #include <sdktools_functions>
 #include <sdktools_stringtables>
 #include <sdktools_gamerules>
-#if SOURCEMOD_V_MINOR >= 9
-	#include <sdktools_variant_t>
-#endif
+#tryinclude <sdktools_variant_t>
 
 static const char
 	MARK[]	= "materials/sprites/bomb_mark.vmt";
@@ -23,7 +21,7 @@ int
 public Plugin myinfo =
 {
 	name		= "Bomb mark",
-	version		= "1.0.0",
+	version		= "1.0.1_22.01.2023",
 	description	= "Creates a mark on the bomb that only the terrorist team can see.",
 	author		= "Grey83",
 	url			= "https://steamcommunity.com/groups/grey83ds"
@@ -49,7 +47,7 @@ stock bool ManageHooks()
 	if(!GameRules_GetProp("m_bMapHasBombTarget") == !hooked)
 		return hooked;
 
-	if((hooked = !hooked))
+	if((hooked ^= true))
 	{
 		HookEvent("bomb_defused",		Event_Bomb, EventHookMode_PostNoCopy);
 		HookEvent("bomb_exploded",		Event_Bomb, EventHookMode_PostNoCopy);
@@ -86,7 +84,7 @@ public void OnClientConnected(int client)
 public void OnEntityCreated(int ent, const char[] cls)
 {
 	if(ent > MaxClients && (!strcmp(cls, "weapon_c4", false) || !strcmp(cls, "planted_c4", false)))
-		RequestFrame(cls[0] == 'p' ? Frame_Planted : Frame_Weapon, ent);
+		RequestFrame(cls[0] == 'p' ? Frame_Planted : Frame_Weapon, EntIndexToEntRef(ent));
 }
 
 public void Frame_Weapon(int bomb)
@@ -101,6 +99,9 @@ public void Frame_Planted(int bomb)
 
 stock void MarkSpawn(int bomb, const int green)
 {
+	if((bomb = EntRefToEntIndex(bomb)) == INVALID_ENT_REFERENCE)
+		return;
+
 	RemoveMark();
 
 	int mark;
@@ -136,7 +137,12 @@ public Action Hook_Transmit(int mark, int client)
 
 stock void RemoveMark()
 {
-	if(iMarkRef != -1 && EntRefToEntIndex(iMarkRef) != -1) AcceptEntityInput(iMarkRef, "Kill");
+	if(iMarkRef != -1 && (iMarkRef = EntRefToEntIndex(iMarkRef)) != -1)
+#if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR < 10
+		AcceptEntityInput(iMarkRef, "Kill");
+#else
+		RemoveEntity(iMarkRef);
+#endif
 	iMarkRef = -1;
 }
 
