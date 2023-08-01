@@ -16,7 +16,7 @@
 
 static const char
 	PL_NAME[]	= "Hit & Kill Sounds",
-	PL_VER[]	= "1.3.0_25.11.2022",
+	PL_VER[]	= "1.3.0_25.11.2022_fix2",
 
 	SOUND[][]	= {"buttons/button15.wav", "buttons/button17.wav"},
 	STATE[][]	= {"☐", "☑"};	// disabled/enabled setting icon
@@ -264,6 +264,7 @@ stock void SendMenu(int client)
 		hMenu.AddItem("", "+5\n    Volume:");
 		hMenu.AddItem("", "-5\n");
 		hMenu.AddItem("", "Observe");
+		hMenu.Pagination = 9;
 		hMenu.ExitBackButton = true;
 	}
 	hMenu.Display(client, MENU_TIME_FOREVER);
@@ -294,6 +295,7 @@ public int Menu_Settings(Menu menu, MenuAction action, int client, int param)
 				case 3: FormatEx(txt, sizeof(txt), "Sound %s", STATE[view_as<int>(bSnd[T_Kill][client])]);
 				case 4: FormatEx(txt, sizeof(txt), "+5\n    Volume: %i", iVol[T_Kill][client]);
 				case 6: FormatEx(txt, sizeof(txt), "Observe %s", STATE[view_as<int>(bEnable[client])]);
+				default: return 0;
 			}
 			return RedrawMenuItem(txt);
 		}
@@ -308,8 +310,8 @@ public int Menu_Settings(Menu menu, MenuAction action, int client, int param)
 				case 0,3:	bSnd[param ? T_Kill : T_Hurt][client] ^= true;
 				case 1:		SetVolume(T_Hurt, iVol[T_Hurt][client] + 5, client);
 				case 2:		SetVolume(T_Hurt, iVol[T_Hurt][client] - 5, client);
-				case 4:		SetVolume(T_Hurt, iVol[T_Kill][client] + 5, client);
-				case 5:		SetVolume(T_Hurt, iVol[T_Kill][client] - 5, client);
+				case 4:		SetVolume(T_Kill, iVol[T_Kill][client] + 5, client);
+				case 5:		SetVolume(T_Kill, iVol[T_Kill][client] - 5, client);
 				case 6:		bEnable[client] ^= true;
 			}
 			FormatEx(txt, sizeof(txt), "%b;%02x;%b;%02x;%b", bSnd[T_Hurt][client], iVol[T_Hurt][client], bSnd[T_Kill][client], iVol[T_Kill][client], bEnable[client]);
