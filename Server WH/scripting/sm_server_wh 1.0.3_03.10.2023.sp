@@ -6,13 +6,12 @@
 #include <sdktools_stringtables>
 #if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR < 9
 	#include <sdktools_entinput>
-#else
-	#include <sdktools_variant_t>
 #endif
+#tryinclude <sdktools_variant_t>
 
 static const char
 	PL_NAME[]	= "Server WH",
-	PL_VER[]	= "1.0.2",
+	PL_VER[]	= "1.0.3_03.10.2023",
 
 	MARK[]	="materials/sprites/wh_frame.vmt";
 static const int
@@ -52,11 +51,11 @@ public void OnPluginStart()
 	CreateConVar("sm_server_wh_version", PL_VER, PL_NAME, FCVAR_SPONLY|FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
 	ConVar cvar;
-	cvar = CreateConVar("sm_swh_mode", "3", "Show marks to the common players: 0 - don't show, 1 - to the Spec, 2 - to the dead allies, 4 - to the dead enemies", _, true, _, true, 7.0);
+	cvar = CreateConVar("sm_swh_mode", "3", "Show marks to the common players: 0 - don't show, 1 - to the Spec, 2 - to the dead allies, 4 - to the dead enemies, 8 - to the alive allies", _, true, _, true, 15.0);
 	cvar.AddChangeHook(CVarChanged_CMode);
 	ChangeVisibility(cvar, 0);
 
-	cvar = CreateConVar("sm_swh_adm_mode", "7", "Show marks to the admins: 0 - don't show, 1 - to the Spec, 2 - to the dead allies, 4 - to the dead enemies", _, true, _, true, 7.0);
+	cvar = CreateConVar("sm_swh_adm_mode", "7", "Show marks to the admins: 0 - don't show, 1 - to the Spec, 2 - to the dead allies, 4 - to the dead enemies, 8 - to the alive allies", _, true, _, true, 15.0);
 	cvar.AddChangeHook(CVarChanged_AMode);
 	ChangeVisibility(cvar, 1);
 
@@ -279,19 +278,19 @@ public Action Timer_Mark(Handle timer, any client)
 
 public Action Hook_TransmitT(int entity, int client)
 {
-	return CanSee(client, 2) ? Plugin_Continue : Plugin_Handled;
+	return CanSee(entity, client, 2) ? Plugin_Continue : Plugin_Handled;
 }
 
 public Action Hook_TransmitCT(int entity, int client)
 {
-	return CanSee(client, 3) ? Plugin_Continue : Plugin_Handled;
+	return CanSee(entity, client, 3) ? Plugin_Continue : Plugin_Handled;
 }
 
-stock bool CanSee(int client, int team)
+stock bool CanSee(int entity, int client, int team)
 {
 	return  IsVisible(client, 1) && !iTeam[client] || (!IsPlayerAlive(client)
-		&& (IsVisible(client, 2) && iTeam[client] == team
-		||  IsVisible(client, 4) && iTeam[client] == 5-team));
+		&& (IsVisible(client, 2) && iTeam[client] == team || IsVisible(client, 4) && iTeam[client] == 5-team))
+		|| IsPlayerAlive(client) && IsVisible(client, 8) && iTeam[client] == team && GetMarkId(client) != entity;
 }
 
 stock bool IsVisible(int client, int type)
