@@ -100,4 +100,5 @@ public int Handler_SPView(Menu menu, MenuAction action, int client, int param)
 		menu.DisplayAt(client, GetMenuSelectionPosition(), MENU_TIME_FOREVER);
 	}
 	else if(action == MenuAction_End) delete menu;
+	return 0;
 }
