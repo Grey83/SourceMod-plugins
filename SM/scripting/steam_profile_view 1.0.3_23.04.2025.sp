@@ -1,47 +1,52 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-static const char	PLUGIN_NAME[]		= "Steam Profile View",
-					PLUGIN_VERSION[]	= "1.0.2";
+static const char
+	PL_NAME[]	= "Steam Profile View",
+	PL_VER[]	= "1.0.3_23.04.2025";
 
-bool bEnable,
+bool
+	bEnable,
 	bSelf,
 	bMotDOff[MAXPLAYERS+1];
 
-public Plugin myinfo = 
+public Plugin myinfo =
 {
-	name		= PLUGIN_NAME,
-	author		= "Grey83",
+	name		= PL_NAME,
+	version		= PL_VER,
 	description	= "Show Players Steam Profile in MotD Window",
-	version		= PLUGIN_VERSION,
+	author		= "Grey83",
 	url			= "http://steamcommunity.com/groups/grey83ds"
-};
+}
 
 public void OnPluginStart()
 {
-	LoadTranslations("common.phrases");
-	CreateConVar("sm_spview_version", PLUGIN_VERSION, PLUGIN_NAME, FCVAR_SPONLY|FCVAR_REPLICATED|FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("sm_spview_version", PL_VER, PL_NAME, FCVAR_DONTRECORD|FCVAR_NOTIFY|FCVAR_SPONLY);
 
-	ConVar CVar;
-	(CVar = CreateConVar("sm_spview_enable", "1", "1/0 - Enable/Disable Plugin", _, true, _, true, 1.0)).AddChangeHook(CVarChanged_Enable);
-	bEnable = CVar.BoolValue;
+	ConVar cvar;
+	cvar = CreateConVar("sm_spview_enable", "1", "1/0 - Enable/Disable Plugin", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Enable);
+	bEnable = cvar.BoolValue;
 
-	(CVar = CreateConVar("sm_spview_self", "1", "1/0 - Enable/Disable show player his own profile", _, true, _, true, 1.0)).AddChangeHook(CVarChanged_Self);
-	bSelf = CVar.BoolValue;
-
-	RegConsoleCmd("sm_profile", Cmd_SPView, "Show Players Steam Profile in MotD Window");
+	cvar = CreateConVar("sm_spview_self", "1", "1/0 - Enable/Disable show player his own profile", _, true, _, true, 1.0);
+	cvar.AddChangeHook(CVarChanged_Self);
+	bSelf = cvar.BoolValue;
 
 	AutoExecConfig(true, "spview");
+
+	LoadTranslations("common.phrases");
+
+	RegConsoleCmd("sm_profile", Cmd_SPView, "Show Players Steam Profile in MotD Window");
 }
 
-public void CVarChanged_Enable(ConVar CVar, const char[] oldValue, const char[] newValue)
+public void CVarChanged_Enable(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	bEnable = newValue[0] == '1';
+	bEnable = cvar.BoolValue;
 }
 
-public void CVarChanged_Self(ConVar CVar, const char[] oldValue, const char[] newValue)
+public void CVarChanged_Self(ConVar cvar, const char[] oldValue, const char[] newValue)
 {
-	bSelf = newValue[0] == '1';
+	bSelf = cvar.BoolValue;
 }
 
 public Action Cmd_SPView(int client, int args)
@@ -50,28 +55,32 @@ public Action Cmd_SPView(int client, int args)
 		return Plugin_Handled;
 
 	QueryClientConVar(client, "cl_disablehtmlmotd", CheckMotD);
-	if(bMotDOff[client]) PrintToChat(client, "You need to set 'cl_disablehtmlmotd' to '0' to be able to use this command.");
-	else
+
+	if(!bMotDOff[client])
 	{
-		int num;
-		char name[64], SID[18];
+		char name[MAX_NAME_LENGTH], SID[20];
 		Menu menu = new Menu(Handler_SPView);
-		for(int i = 1; i <= MaxClients; i++)
+		for(int i; ++i <= MaxClients;)
 			if((client != i || bSelf) && IsClientInGame(i) && !IsFakeClient(i)
 			&& GetClientAuthId(i, AuthId_SteamID64, SID, sizeof(SID)))
 			{
-				num++;
 				GetClientName(i, name, sizeof(name));
 				menu.AddItem(SID, name);
 			}
-		if(num > 0)
+
+		if(menu.ItemCount > 0)
 		{
 			menu.SetTitle("Show Steam profile:");
 			menu.ExitButton = true;
 			menu.Display(client, MENU_TIME_FOREVER);
 		}
-		else ReplyToCommand(client, "[SM] %t", "No matching clients");
+		else
+		{
+			CloseHandle(menu);
+			ReplyToCommand(client, "[SM] %t", "No matching clients");
+		}
 	}
+	else PrintToChat(client, "You need to set 'cl_disablehtmlmotd' to '0' to be able to use this command.");
 
 	return Plugin_Handled;
 }
@@ -85,7 +94,7 @@ public int Handler_SPView(Menu menu, MenuAction action, int client, int param)
 {
 	if(action == MenuAction_Select)
 	{
-		char link[53], title[128];
+		char link[56], title[MAX_NAME_LENGTH+16];
 		menu.GetItem(param, link, sizeof(link), _, title, sizeof(title));
 
 		KeyValues kv = new KeyValues("data");
@@ -99,5 +108,7 @@ public int Handler_SPView(Menu menu, MenuAction action, int client, int param)
 
 		menu.DisplayAt(client, GetMenuSelectionPosition(), MENU_TIME_FOREVER);
 	}
-	else if(action == MenuAction_End) delete menu;
+	else if(action == MenuAction_End) CloseHandle(menu);
+
+	return 0;
 }
