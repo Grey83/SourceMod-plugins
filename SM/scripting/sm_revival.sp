@@ -12,22 +12,17 @@
 #include <sdkhooks>
 #include <sdktools_entinput>
 #include <sdktools_functions>
+#include <sdktools_gamerules>
 #include <sdktools_sound>
 #include <sdktools_stringtables>
 #include <sdktools_tempents>
 #tryinclude <sdktools_variant_t>
 #include <usermessages>
 
-#include <sdktools_gamerules>
 
-#if SOURCEMOD_V_MINOR > 10
-	#define PL_NAME	"Revival"
-	#define PL_VER	"1.1.6_23.10.2022"
-#else
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.6_23.10.2022";
-#endif
+	PL_VER[]	= "1.1.8_12.07.2024";
 
 #define IS_CORE true	// set to false if not needed modules support
 
@@ -489,7 +484,8 @@ public void OnPluginStart()
 
 	HookEvent("player_team", Event_Team);
 	HookEvent("player_spawn", Event_Spawn);
-	HookEvent("player_death", Event_Death);
+//	HookEvent("player_death", Event_Death);
+	HookEvent("player_hurt", Event_Death);
 	HookEvent("round_start", Event_RoundStart, EventHookMode_PostNoCopy);
 
 	LoadTranslations("revival.phrases");
@@ -646,7 +642,7 @@ public void CVarChanged_Sound(ConVar cvar, const char[] oldVal, const char[] new
 	cvar.GetString(sCvarPath, sizeof(sCvarPath));
 
 	int len = strlen(sCvarPath) - 4;
-	if(len < 1 || strcmp(sCvarPath[len], ".mp3", false) && strcmp(sCvarPath[len], ".wav", false))
+	if(len < 1 || (strcmp(sCvarPath[len], ".mp3", false) && strcmp(sCvarPath[len], ".wav", false)))
 		sCvarPath[0] = sSound[0] = 0;
 	else AddSound();
 }
@@ -1020,7 +1016,7 @@ public int Menu_Revival(Menu menu, MenuAction action, int client, int param)
 			return RedrawMenuItem(txt);
 		}
 		case MenuAction_DrawItem:
-			return param < 4 && iKey[client] == param || param > 3 && iHUD[client] == (param - 4) ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT;
+			return (param < 4 && iKey[client] == param) || (param > 3 && iHUD[client] == (param - 4)) ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT;
 		case MenuAction_Select:
 		{
 			if(param == 7)
@@ -1091,7 +1087,7 @@ public void Event_Team(Event event, const char[] name, bool dontBroadcast)
 
 public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 {
-	if(IsWarmup())
+	if(IsWarmup() || event.GetInt("health") > 0)
 		return;
 
 	static int client;
@@ -1100,7 +1096,8 @@ public void Event_Death(Event event, const char[] name, bool dontBroadcast)
 
 	sKeyHintText[client][0] = 0;
 	CountAlive();
-	if(!bEnable || !bNoEnd && !bAllowed || iRIP & 1 && event.GetBool("headshot") || iRevived[0] && iRevived[client] >= iRevived[0])
+	if(!bEnable || (!bNoEnd && !bAllowed) || (iRIP & 1 && event.GetInt("hitgroup") == 1)
+	|| (iRevived[0] && iRevived[client] >= iRevived[0]))
 		return;
 
 	if(iRIP & 2)
@@ -1130,7 +1127,7 @@ public Action Timer_RemoveBody(Handle timer, int entity)
 	|| (client = GetEntPropEnt(entity, Prop_Send, "m_hPlayer")) < 1 || client > MaxClients)
 		return Plugin_Stop;
 
-	if(iDissolve != -1 && (IsDissolverExist() || CreateDissolver()))
+	if(iDissolve != -1 && CreateDissolver())
 	{
 		DispatchKeyValue(entity, "targetname", "dissolved_ragdoll");
 		AcceptEntityInput(iDissolver, "Dissolve");
@@ -1180,7 +1177,7 @@ stock void CountAlive()
 	}
 	iDiff = ct - t;
 
-	bBlocked = bLastMan && (t == 1 || ct == 1) || bDuel && t == 1 && ct == 1;
+	bBlocked = (bLastMan && (t == 1 || ct == 1)) || (bDuel && t == 1 && ct == 1);
 }
 
 public void Event_RoundStart(Event event, const char[] name, bool dontBroadcast)
@@ -1224,7 +1221,8 @@ stock void UpdateDissolver()
 
 stock bool CreateDissolver()
 {
-	if(IsDissolverExist()) return true;
+	if(IsDissolverExist())
+		return true;
 
 	int entity;
 	if((entity = CreateEntityByName("env_entity_dissolver")) == -1)
@@ -1399,7 +1397,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 */		return change ? Plugin_Changed : Plugin_Continue;
 	}
 
-	if(!bEnable || !bNoEnd && !bAllowed || bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
+	if(!bEnable || (!bNoEnd && !bAllowed) || bBlocked || !IsPlayerValid(client) || (iTimes && iUses[client] >= iTimes))
 		return change ? Plugin_Changed : Plugin_Continue;
 
 	if(iBalance != -1 && iTeam[client] > CS_TEAM_SPECTATOR && (iKey[client] == 3 || buttons & KEY_VAL[iKey[client]])
@@ -1442,7 +1440,7 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 	}
 
 	cant = iHPCost && (diff = (health = GetClientHealth(client)) - iHPCost) < 1 && !bDeath;
-	if((iKey[client] == 3 || buttons & KEY_VAL[iKey[client]] && !(old_buttons[client] & KEY_VAL[iKey[client]])) && cant && !old_target[client])
+	if((iKey[client] == 3 || (buttons & KEY_VAL[iKey[client]] && !(old_buttons[client] & KEY_VAL[iKey[client]]))) && cant && !old_target[client])
 	{
 		perc = RoundToNearest(fProgress[client][old_target[client]]);
 		SaveStats(client, perc, false);
@@ -1477,12 +1475,12 @@ public Action OnPlayerRunCmd(int client, int &buttons, int &impulse, float vel[3
 		warned[client] = false;
 		if(!old_target[client] || !iDeathTeam[old_target[client]])
 			target[client] = GetNearestTarget(client);
-		else if((iOffsetVel_0 != -1 || (iOffsetVel_0 = FindSendPropInfo("CCSPlayer", "m_vecVelocity[0]")) != -1)
-		&& GetEntDataFloat(client, iOffsetVel_0)
-		|| (iOffsetVel_1 != -1 || (iOffsetVel_1	= FindSendPropInfo("CCSPlayer", "m_vecVelocity[1]")) != -1)
-		&& GetEntDataFloat(client, iOffsetVel_1)
-		|| (iOffsetVel_2 != -1 || (iOffsetVel_2	= FindSendPropInfo("CCSPlayer", "m_vecVelocity[2]")) != -1)
-		&& GetEntDataFloat(client, iOffsetVel_2))
+		else if((iOffsetVel_0 != -1 || ((iOffsetVel_0 = FindSendPropInfo("CCSPlayer", "m_vecVelocity[0]")) != -1)
+		&& GetEntDataFloat(client, iOffsetVel_0))
+		|| ((iOffsetVel_1 != -1 || (iOffsetVel_1	= FindSendPropInfo("CCSPlayer", "m_vecVelocity[1]")) != -1)
+		&& GetEntDataFloat(client, iOffsetVel_1))
+		|| ((iOffsetVel_2 != -1 || (iOffsetVel_2	= FindSendPropInfo("CCSPlayer", "m_vecVelocity[2]")) != -1)
+		&& GetEntDataFloat(client, iOffsetVel_2)))
 		{
 			GetClientAbsOrigin(client, pos);
 			if(FloatCompare(fRadius, GetVectorDistance(pos, fDeathPos[old_target[client]])) == -1)
@@ -1610,16 +1608,19 @@ stock void CreateMark(int client)
 	iTeam[client] = GetClientTeam(client);
 
 	GetClientAbsOrigin(client, fDeathPos[client]);
-	fDeathPos[client][2] -= 40;
+	float pos[3];
+	pos = fDeathPos[client];
+	pos[2] += 10;
 	GetClientAbsAngles(client, fDeathAng[client]);
 
 	static int ent, type;
 	if((ent = GetMarkId(client)) != -1) KillEntity(ent);
 
-	if((ent = CreateEntityByName("env_sprite")) == -1) return;
+	if((ent = CreateEntityByName("env_sprite")) == -1)
+		return;
 
 	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
-	DispatchKeyValueVector(ent, "origin", fDeathPos[client]);
+	DispatchKeyValueVector(ent, "origin", pos);
 	DispatchKeyValue(ent, "model", sMark[type]);
 	DispatchKeyValue(ent, "classname", "death_mark");
 	DispatchKeyValue(ent, "spawnflags", "1");
@@ -1658,12 +1659,12 @@ stock void SetMarkColor(int client, int type = -1)
 
 public Action Hook_TransmitT(int mark, int client)	// если террорист
 {
-	return iTeam[client] != CS_TEAM_CT ? Plugin_Continue : Plugin_Handled;
+	return iTeam[client] != CS_TEAM_CT && (!iTimes || iUses[client] < iTimes) ? Plugin_Continue : Plugin_Handled;
 }
 
 public Action Hook_TransmitCt(int mark, int client)	// если спецназовец
 {
-	return iTeam[client] != CS_TEAM_T ? Plugin_Continue : Plugin_Handled;
+	return iTeam[client] != CS_TEAM_T && (!iTimes || iUses[client] < iTimes) ? Plugin_Continue : Plugin_Handled;
 }
 
 stock void ResetRespawnData(int client, bool round = false)
@@ -1705,7 +1706,7 @@ stock int GetNearestTarget(int client)
 
 	i = target = 0, min_dist = fRadius;
 	while(++i <= MaxClients) if(i != client && (bTogether || !iReviver[i] || iReviver[i] == client)
-		&& iDeathTeam[i] > 1 && (bEnemy || team == iDeathTeam[i]) 
+		&& iDeathTeam[i] > 1 && (bEnemy || team == iDeathTeam[i])
 		&& FloatCompare(min_dist, (dist[i] = GetVectorDistance(pos, fDeathPos[i]))) == 1)
 		{
 			min_dist = dist[i];
@@ -1761,7 +1762,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	}
 	else if(iPos == 1) TeleportEntity(target, fDeathPos[target], fDeathAng[target], NULL_VECTOR);
 	SetEntityHealth(target, hp);
-	SetEntPropFloat(client, Prop_Send, "m_flFlashDuration", 0.0);
+	SetEntPropFloat(target, Prop_Send, "m_flFlashDuration", 0.0);
 
 	if(iFeed)
 	{
@@ -1773,7 +1774,8 @@ stock void InitRespawn(int client, int target, int health, int diff)
 			event.SetString("weapon", "shieldgun");
 			for(int i = 1, t; i <= MaxClients; i++)
 				if(IsClientInGame(i) && !IsFakeClient(i)
-				&& ((t = GetClientTeam(i) == buffer) && iFeed & 1 || t == 5 - buffer && iFeed & 2 || t < 2 && iFeed & 4))
+				&& (((t = GetClientTeam(i) == buffer) && iFeed & 1) || (t == 5 - buffer && iFeed & 2)
+				|| (t < 2 && iFeed & 4)))
 					event.FireToClient(i);
 			event.Cancel();
 		}
@@ -1819,7 +1821,7 @@ stock void InitRespawn(int client, int target, int health, int diff)
 	iUses[client]++;
 	iRevived[target]++;
 
-	if(!iTimes || !bMsg && iHUD[client]) return;
+	if(!iTimes || (!bMsg && iHUD[client])) return;
 
 	if(iUses[client] >= iTimes) PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsNotAvailable");
 	else PrintToChatClr(client, "%t%t", "ChatTag", "RevivalsAvailable", iTimes - iUses[client]);
@@ -1865,8 +1867,8 @@ stock void SetProgressBar(const int client, const float time, const int left)
 	if(!IsClientValid(client) || !bBar[client]) return;
 
 	static int start, duration;
-	if(start < 1 && (start = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) < 1
-	|| duration < 1 && (duration = FindSendPropInfo("CCSPlayer", "m_iProgressBarDuration")) < 1)
+	if((start < 1 && (start = FindSendPropInfo("CCSPlayer", "m_flProgressBarStartTime")) < 1)
+	|| (duration < 1 && (duration = FindSendPropInfo("CCSPlayer", "m_iProgressBarDuration")) < 1))
 		return;
 
 	SetEntDataFloat(client, start, time, true);
