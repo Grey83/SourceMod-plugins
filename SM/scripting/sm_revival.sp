@@ -22,7 +22,7 @@
 
 static const char
 	PL_NAME[]	= "Revival",
-	PL_VER[]	= "1.1.8_12.07.2024";
+	PL_VER[]	= "1.1.9_08.05.2025";
 
 #define IS_CORE true	// set to false if not needed modules support
 
@@ -153,6 +153,8 @@ int
 	iTarget[MAXPLAYERS+1],
 	iReviver[MAXPLAYERS+1],
 	iRevives[MAXPLAYERS+1][2],
+	iVisible,
+	iAltitude,
 	iDiff,
 	iPercents[MAXPLAYERS+1];
 float
@@ -439,6 +441,16 @@ public void OnPluginStart()
 	cvar = CreateConVar("sm_revival_mark_any", ".vmt", "Path to the vmt-file in folder 'materials' for the Any mark. Wrong or empty path = default mark.", FCVAR_PRINTABLEONLY);
 	cvar.AddChangeHook(CVarChanged_MarkAny);
 	PrepareMark(cvar, M_Any);
+
+	cvar = CreateConVar("sm_revival_mark_show", "0", "Marks can see: 0 - who are able to revive and spectators team, 1 - previous point plus those who have lost this ability, 2 - all.", _, true, _, true, 2.0);
+	cvar.AddChangeHook(CVarChanged_MarkShow);
+	iVisible = cvar.IntValue;
+
+	// https://developer.valvesoftware.com/wiki/Dimensions_(Half-Life_2_and_Counter-Strike:_Source)
+	// https://developer.valvesoftware.com/wiki/Counter-Strike:_Global_Offensive/Mapper%27s_Reference
+	cvar = CreateConVar("sm_revival_mark_altitude", "10", "The height of the position of the created marks.", _, true, _, true, 75.0);
+	cvar.AddChangeHook(CVarChanged_MarkAlt);
+	iAltitude = cvar.IntValue;
 
 	if(iEngine != E_Old)
 	{
@@ -765,6 +777,24 @@ stock void PrecacheMark(const char[] path)
 	AddFileToDownloadsTable(buffer);
 	AddFileToDownloadsTable(path);
 	PrecacheModel(path, true);
+}
+
+public void CVarChanged_MarkShow(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iVisible = cvar.IntValue;
+}
+
+public void CVarChanged_MarkAlt(ConVar cvar, const char[] oldValue, const char[] newValue)
+{
+	iAltitude = cvar.IntValue;
+
+	float pos[3];
+	for(int i, ent; ++i <= MaxClients;) if(iMarkRef[i] != -1 && (ent = EntRefToEntIndex(iMarkRef[i])) != -1)
+	{
+		pos = fDeathPos[i];
+		pos[2] += iAltitude;
+		TeleportEntity(ent, pos, NULL_VECTOR, NULL_VECTOR);
+	}
 }
 
 stock void UpdateTimer()
@@ -1610,14 +1640,17 @@ stock void CreateMark(int client)
 	GetClientAbsOrigin(client, fDeathPos[client]);
 	float pos[3];
 	pos = fDeathPos[client];
-	pos[2] += 10;
+	pos[2] += iAltitude;
 	GetClientAbsAngles(client, fDeathAng[client]);
 
 	static int ent, type;
 	if((ent = GetMarkId(client)) != -1) KillEntity(ent);
 
 	if((ent = CreateEntityByName("env_sprite")) == -1)
+	{
+		LogError("Can't create entity 'env_sprite'!");
 		return;
+	}
 
 	type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
 	DispatchKeyValueVector(ent, "origin", pos);
@@ -1634,37 +1667,36 @@ stock void CreateMark(int client)
 
 	iMarkRef[client] = EntIndexToEntRef(ent);
 	SetMarkColor(client, type);
+	SDKHook(ent, SDKHook_SetTransmit, (iTeam[client] == CS_TEAM_T ? Hook_TransmitT : Hook_TransmitCt));
 }
 
 stock void SetMarkColor(int client, int type = -1)
 {
-	SDKHookCB transmit = iTeam[client] == CS_TEAM_T ? Hook_TransmitT : Hook_TransmitCt;
-	if(type == -1)
-	{
-		if(bEnemy) SDKUnhook(GetMarkId(client), SDKHook_SetTransmit, transmit);
-		type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
-	}
+	if(type == -1) type = bEnemy ? M_Any : iTeam[client] == CS_TEAM_T ? M_T : M_CT;
 
 	static char buffer[12];
 	FormatEx(buffer, sizeof(buffer), "%i %i %i", (iColor[type] & 0xFF0000) >> 16, (iColor[type] & 0xFF00) >> 8, iColor[type] & 0xFF);
 	SetVariantString(buffer);
 	AcceptEntityInput(iMarkRef[client], "Color");
 
-	if(bEnemy) return;
-
 	int ent = GetMarkId(client);
 	SetEdictFlags(ent, GetEdictFlags(ent) & ~(FL_EDICT_ALWAYS|FL_EDICT_DONTSEND|FL_EDICT_PVSCHECK));
-	SDKHook(ent, SDKHook_SetTransmit, transmit);
 }
 
 public Action Hook_TransmitT(int mark, int client)	// если террорист
 {
-	return iTeam[client] != CS_TEAM_CT && (!iTimes || iUses[client] < iTimes) ? Plugin_Continue : Plugin_Handled;
+	return IsMarkVisible(client, CS_TEAM_T) ? Plugin_Continue : Plugin_Handled;
 }
 
 public Action Hook_TransmitCt(int mark, int client)	// если спецназовец
 {
-	return iTeam[client] != CS_TEAM_T && (!iTimes || iUses[client] < iTimes) ? Plugin_Continue : Plugin_Handled;
+	return IsMarkVisible(client, CS_TEAM_CT) ? Plugin_Continue : Plugin_Handled;
+}
+
+bool IsMarkVisible(int client, int team)
+{
+	return iVisible == 2 || iTeam[client] < CS_TEAM_T
+		|| ((bEnemy || iTeam[client] == team) && (iVisible == 1 || !iTimes || iUses[client] < iTimes));
 }
 
 stock void ResetRespawnData(int client, bool round = false)
