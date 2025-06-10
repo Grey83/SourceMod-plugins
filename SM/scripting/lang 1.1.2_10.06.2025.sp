@@ -5,7 +5,7 @@
 
 static const char
 	PL_NAME[]	= "Language",
-	PL_VER[]	= "1.1.0_07.09.2023";
+	PL_VER[]	= "1.1.2_10.06.2025";
 
 ArrayList
 	hName,
@@ -19,7 +19,7 @@ bool
 int
 	iLang[MAXPLAYERS+1] = {-1, ...};
 char
-	sCode[4],
+	sCode[8],
 	sBuffer[64];
 
 public Plugin myinfo = 
@@ -39,6 +39,12 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 
 public void OnPluginStart()
 {
+	int num = GetLanguageCount();
+	if(num < 1)
+	{
+		SetFailState("File '/addons/sourcemod/configs/languages.cfg' does not contain records.");
+	}
+
 	CreateConVar("sm_lang_version", PL_VER, PL_NAME, FCVAR_DONTRECORD|FCVAR_NOTIFY|FCVAR_SPONLY);
 
 	LoadTranslations("common.phrases");
@@ -48,12 +54,8 @@ public void OnPluginStart()
 	hCookies = RegClientCookie("client_lang", "Saved client language", CookieAccess_Private);
 	SetCookieMenuItem(LangMenu, 0, "Language");
 
-	int num = GetLanguageCount();
-	if(num > 0)
-		return;
-
-	hCode = new ArrayList(ByteCountToCells(4));
-	hName = new ArrayList(ByteCountToCells(64));
+	hCode = new ArrayList(ByteCountToCells(sizeof(sCode)));
+	hName = new ArrayList(ByteCountToCells(sizeof(sBuffer)));
 
 	hMenu = CreateMenu(LangMenuHandler, MenuAction_Display|MenuAction_DrawItem|MenuAction_DisplayItem);
 	hMenu.SetTitle("Language:");
@@ -72,12 +74,7 @@ public void OnPluginStart()
 	if(!bLate)
 		return;
 
-	for(int i = 1; i <= MaxClients; i++) if(IsClientInGame(i) && AreClientCookiesCached(i)) OnClientPostAdminCheck(i);
-}
-
-public void OnClientPostAdminCheck(int client)
-{
-	if(iLang[client] == -1) OnClientCookiesCached(client);
+	for(int i; ++i <= MaxClients;) if(IsClientInGame(i) && AreClientCookiesCached(i)) OnClientCookiesCached(i);
 }
 
 public void OnClientCookiesCached(int client)
@@ -86,9 +83,41 @@ public void OnClientCookiesCached(int client)
 		return;
 
 	GetClientCookie(client, hCookies, sCode, sizeof(sCode));
-	iLang[client] = GetLanguageByCode(sCode);
-	if(iLang[client] != -1) SetClientLanguage(client, iLang[client]);
+	if(sCode[0] && (iLang[client] = GetLanguageByCode(sCode)) != -1) SetClientLanguage(client, iLang[client]);
 }
+
+#if SOURCEMOD_V_MAJOR == 1 && SOURCEMOD_V_MINOR < 11
+public void OnClientAuthorized(int client, const char[] auth)
+{
+	SetLanguage(client);
+}
+
+public void OnClientPutInServer(int client)
+{
+	SetLanguage(client);
+}
+
+public void OnClientPostAdminCheck(int client)
+{
+	SetLanguage(client);
+}
+
+void SetLanguage(int client)
+{
+	if(iLang[client] != -1 && iLang[client] != GetClientLanguage(client) && !IsFakeClient(client))
+		SetClientLanguage(client, iLang[client]);
+}
+#else
+public void OnClientLanguageChanged(int client, int lang)
+{
+	if(iLang[client] != lang) SetLanguage(client);
+}
+
+void SetLanguage(int client)
+{
+	if(iLang[client] != -1 && !IsFakeClient(client)) SetClientLanguage(client, iLang[client]);
+}
+#endif
 
 public void OnClientDisconnect(int client)
 {
@@ -99,6 +128,9 @@ public Action Cmd_Lang(int client, int args)
 {
 	if(client)
 	{
+		if(IsFakeClient(client))
+			return Plugin_Handled;
+
 		if(!args)
 		{
 			int lang = iLang[client] == -1 ? GetClientLanguage(client) : iLang[client];
@@ -133,7 +165,7 @@ public void LangMenu(int client, CookieMenuAction action, any info, char[] buffe
 		}
 		else FormatEx(buffer, maxlen, "Language");
 	}
-	else if(action == CookieMenuAction_SelectOption)	if(hMenu) hMenu.Display(client, MENU_TIME_FOREVER);
+	else if(action == CookieMenuAction_SelectOption && hMenu) hMenu.Display(client, MENU_TIME_FOREVER);
 }
 
 public int LangMenuHandler(Menu menu, MenuAction action, int client, int item)
@@ -153,17 +185,19 @@ public int LangMenuHandler(Menu menu, MenuAction action, int client, int item)
 		{
 			hCode.GetString(item, sCode, sizeof(sCode));
 			hName.GetString(item, sBuffer, sizeof(sBuffer));
-			Format(sBuffer, sizeof(sBuffer), "%s%s", sBuffer, item == iLang[client] ? " ☑" : "");
+			Format(sBuffer, sizeof(sBuffer), "%s (%s) %s", sBuffer, sCode, item == iLang[client] ? " ☑" : "");
 			return RedrawMenuItem(sBuffer);
 		}
-		case MenuAction_DrawItem:	return item == iLang[client] ?  ITEMDRAW_DEFAULT : ITEMDRAW_DISABLED;
+		case MenuAction_DrawItem:
+			return item == iLang[client] ? ITEMDRAW_DISABLED : ITEMDRAW_DEFAULT;
 		case MenuAction_Select:
 		{
 			int pos = GetMenuSelectionPosition();
 			ChangeLanuage(client, item);
 			hMenu.DisplayAt(client, pos, MENU_TIME_FOREVER);
 		}
-		case MenuAction_Cancel:		if(item == MenuCancel_ExitBack) ShowCookieMenu(client);
+		case MenuAction_Cancel:
+			if(item == MenuCancel_ExitBack) ShowCookieMenu(client);
 	}
 
 	return 0;
