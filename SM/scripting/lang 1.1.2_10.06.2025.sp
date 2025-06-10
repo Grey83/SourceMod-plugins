@@ -185,7 +185,7 @@ public int LangMenuHandler(Menu menu, MenuAction action, int client, int item)
 		{
 			hCode.GetString(item, sCode, sizeof(sCode));
 			hName.GetString(item, sBuffer, sizeof(sBuffer));
-			Format(sBuffer, sizeof(sBuffer), "%s (%s) %s", sBuffer, sCode, item == iLang[client] ? " ☑" : "");
+			Format(sBuffer, sizeof(sBuffer), "%s (%s)%s", sBuffer, sCode, item == iLang[client] ? " ☑" : "");
 			return RedrawMenuItem(sBuffer);
 		}
 		case MenuAction_DrawItem:
